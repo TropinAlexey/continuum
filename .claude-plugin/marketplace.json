@@ -1,0 +1,14 @@
+{
+  "name": "token-budget",
+  "owner": {
+    "name": "Alexey Tropin",
+    "url": "https://github.com/TropinAlexey"
+  },
+  "plugins": [
+    {
+      "name": "token-budget",
+      "source": "./",
+      "description": "Warns before the Claude Code usage limit, plans the remaining budget with you, and can auto-resume after the reset"
+    }
+  ]
+}

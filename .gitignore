@@ -1,0 +1,4 @@
+.usage-cache.json
+.usage-cache.fail
+.budget-warned-*
+auto-resume.log
