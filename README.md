@@ -74,9 +74,21 @@ continuum status      # 5 hours   86.5%   resets at 21:40
                       # 7 days    41.0%   resets at 02:00
 continuum reset       # 21:41   (reset +90s, ready to schedule against)
 continuum providers   # anthropic, mock
+continuum watch       # poll in a spare pane; ring the bell at the threshold
 
 continuum resume "$(continuum reset)" "$PWD" "finish the DocumentService tests"
 ```
+
+Not using Claude Code? `continuum watch` needs no hooks and no plugin — it works in any
+terminal, and `continuum resume` drives whatever agent you point it at:
+
+```sh
+CONTINUUM_RESUME_CMD='codex exec "{prompt}"'    continuum resume 21:41 "$PWD" "finish the tests"
+CONTINUUM_RESUME_CMD='opencode run "{prompt}"'  continuum resume 21:41 "$PWD" "finish the tests"
+```
+
+See **[docs/harnesses.md](docs/harnesses.md)** for what is verified and what is merely likely —
+we keep that line sharp.
 
 ## Read this before installing
 
@@ -147,6 +159,8 @@ Without Git Bash, override the hook in your `settings.json`:
 |---|---|---|
 | `CONTINUUM_THRESHOLD` | `80` | Percent of the primary window that triggers the warning. |
 | `CONTINUUM_PROVIDER` | `anthropic` | Which provider to ask. |
+| `CONTINUUM_RESUME_CMD` | `claude --continue -p "{prompt}" …` | Which agent `resume` wakes up. `{prompt}` is the task. |
+| `CONTINUUM_DRY_RUN` | unset | `resume` prints the command instead of scheduling it. |
 | `CONTINUUM_OFF` | unset | Set to anything to disable the hook. |
 | `CONTINUUM_CACHE_MIN` | `10` | Minutes to cache a provider response. |
 
@@ -193,13 +207,16 @@ can still decide otherwise. Lower `CONTINUUM_THRESHOLD` to get the nudge earlier
 ## Contributing
 
 ```
-sh tests/run.sh          # 18 tests, mock provider, no network
+sh tests/run.sh          # 24 tests, mock provider, no network
 pwsh tests/run.ps1       # the same suite against the PowerShell implementation
 ```
 
 CI runs both on Linux, macOS, and Windows. Things that would genuinely help:
 
 - A provider for another budget: OpenAI spend, Gemini quota, your team's shared cap.
+  See **[docs/writing-a-provider.md](docs/writing-a-provider.md)** — it takes about ten minutes.
+- Confirmation of whether Codex CLI honours a blocking `Stop` hook. We do not know yet, and
+  [docs/harnesses.md](docs/harnesses.md) says so.
 - A `launchd`/`systemd`/Task Scheduler backend for `continuum resume`, so scheduled resumes
   survive reboots.
 - Acting on the weekly window, not just reporting it.

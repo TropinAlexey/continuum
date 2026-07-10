@@ -33,6 +33,20 @@ if CONTINUUM_PROVIDER=nope sh "$ROOT/bin/continuum" status >/dev/null 2>&1
 then bad "unknown provider fails" "exit 0"
 else ok  "unknown provider fails"; fi
 
+echo "resume:"
+dry() { CONTINUUM_DRY_RUN=1 CONTINUUM_RESUME_CMD="$1" sh "$ROOT/bin/continuum" resume 23:59 "$ROOT" "$2" 2>&1; }
+check "default agent is claude"   'claude --continue -p "finish it"' "$(dry '' 'finish it')"
+check "swappable agent"           'sh exec "run it"'                 "$(dry 'sh exec "{prompt}"' 'run it')"
+check "template without {prompt}" 'sh --continue'                    "$(dry 'sh --continue' 'ignored')"
+check "hostile prompt escaped"    '\"the\"'                        "$(dry 'sh run "{prompt}"' 'fix "the" bug')"
+# No dry run here: the PATH check only runs on the real scheduling path.
+if CONTINUUM_RESUME_CMD='nosuchagent {prompt}' sh "$ROOT/bin/continuum" resume 23:59 "$ROOT" x >/dev/null 2>&1
+then bad "missing agent fails" "exit 0"
+else ok  "missing agent fails"; fi
+
+echo "watch:"
+check "watch fires over threshold" "resets at" "$(CONTINUUM_MOCK='91.0' sh "$ROOT/bin/continuum" watch 1 2>&1)"
+
 echo "hook:"
 out=$(hook a '{"session_id":"a"}')
 check "blocks over threshold"  '"decision":"block"' "$out"

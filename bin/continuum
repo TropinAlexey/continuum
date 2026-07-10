@@ -4,10 +4,12 @@
 #   continuum status            utilization of every window the provider reports
 #   continuum reset             local HH:MM when the primary window rolls over (+90s)
 #   continuum providers         list available providers
+#   continuum watch [seconds]   poll until the threshold is crossed, then say so
 #   continuum resume HH:MM [dir] [prompt]
-#                               schedule `claude --continue` for after the reset
+#                               schedule the agent to pick up after the reset
 #
 #   CONTINUUM_PROVIDER=mock continuum status     pick a provider (default: anthropic)
+#   CONTINUUM_RESUME_CMD='codex exec "{prompt}"' pick an agent (default: claude)
 set -eu
 
 # Resolve lib/ whether we run in place, via a PATH symlink, or from a plugin install.
@@ -19,7 +21,7 @@ for d in "$(dirname "$self")/../lib" "${CLAUDE_PLUGIN_ROOT:-}/lib" "${CLAUDE_CON
 done
 command -v cnt_read >/dev/null 2>&1 || { echo "continuum: lib/core.sh not found" >&2; exit 1; }
 
-usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; }
 
 label() {  # pretty names for the windows a provider reports
     case "$1" in
@@ -50,34 +52,87 @@ cmd_reset() {
     cnt_epoch_hhmm "$reset" 90
 }
 
+# Which agent to wake up. {prompt} is replaced with the task description.
+# Claude Code by default; point it at any CLI that can resume a session headless:
+#   CONTINUUM_RESUME_CMD='codex exec "{prompt}"'
+#   CONTINUUM_RESUME_CMD='opencode run "{prompt}"'
+# NB: not ${VAR:-default} - the `}` inside `{prompt}` would close the expansion early.
+CNT_RESUME_CMD="${CONTINUUM_RESUME_CMD:-}"
+[ -n "$CNT_RESUME_CMD" ] || CNT_RESUME_CMD='claude --continue -p "{prompt}" --permission-mode acceptEdits'
+
 cmd_resume() {
     T="${1:-}"; [ -n "$T" ] || { echo "continuum resume: need HH:MM" >&2; exit 1; }
     DIR="${2:-$PWD}"
     PROMPT="${3:-continue, please}"
     LOG="$CNT_CFG/continuum-resume.log"
 
-    command -v claude >/dev/null 2>&1 || { echo "\`claude\` not found in PATH" >&2; exit 1; }
     [ -d "$DIR" ] || { echo "no such directory: $DIR" >&2; exit 1; }
-    CLAUDE_BIN=$(command -v claude)
+
+    # Substitute {prompt} with awk's index/substr: no globbing, no sed delimiters to
+    # collide with, no eval. The prompt lands inside double quotes in the template, so
+    # neutralise the characters the shell would still interpret there.
+    cmd=$(CNT_TMPL="$CNT_RESUME_CMD" CNT_P="$PROMPT" awk 'BEGIN {
+        t = ENVIRON["CNT_TMPL"]; p = ENVIRON["CNT_P"]
+        gsub(/[\\"$`]/, "\\\\&", p)
+        i = index(t, "{prompt}")
+        if (i == 0) print t                          # no placeholder: run as written
+        else print substr(t, 1, i - 1) p substr(t, i + 8)
+    }')
 
     delay=$(cnt_hhmm_delay "$T") || exit 1
+
+    # Dry run prints the command it *would* run - the agent need not be installed here.
+    if [ -n "${CONTINUUM_DRY_RUN:-}" ]; then
+        printf 'would sleep %s then run in %s: %s\n' "$delay" "$DIR" "$cmd"
+        return 0
+    fi
+
+    agent=${CNT_RESUME_CMD%% *}
+    command -v "$agent" >/dev/null 2>&1 || { echo "\`$agent\` not found in PATH" >&2; exit 1; }
+
     mkdir -p "$CNT_CFG" 2>/dev/null || true
     printf '\n=== scheduled %s for %s in %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$T" "$DIR" >> "$LOG"
 
     # Detached: survives closing the terminal, does NOT survive a reboot.
-    nohup sh -c 'sleep "$1"; cd "$2" || exit 1; exec "$3" --continue -p "$4" --permission-mode acceptEdits' \
-        _ "$delay" "$DIR" "$CLAUDE_BIN" "$PROMPT" >> "$LOG" 2>&1 &
+    nohup sh -c 'sleep "$1"; cd "$2" || exit 1; shift 2; exec sh -c "$1"' \
+        _ "$delay" "$DIR" "$cmd" >> "$LOG" 2>&1 &
     pid=$!
 
     printf 'Resuming in %s min (at %s) in %s: "%s"\n' "$(( delay / 60 ))" "$T" "$DIR" "$PROMPT"
     printf 'Scheduled, PID %s. Cancel: kill %s   Log: %s\n' "$pid" "$pid" "$LOG"
-    printf 'It runs headless with acceptEdits - it will edit code unattended.\n'
+    printf 'It runs headless - it will edit code unattended.\n'
+}
+
+# Harness-independent fallback: no hooks, no plugin, works with any agent in any
+# shell. Poll until the threshold is crossed, say so, exit. Run it in a spare pane.
+cmd_watch() {
+    threshold="${CONTINUUM_THRESHOLD:-80}"
+    every="${1:-300}"
+    while :; do
+        if lines=$(cnt_read 2>/dev/null); then
+            util=$(printf '%s\n' "$lines" | cnt_field 2)
+            util_i=${util%%.*}
+            case "$util_i" in ''|*[!0-9]*) util_i=0 ;; esac
+            if [ "$util_i" -ge "$threshold" ]; then
+                reset=$(printf '%s\n' "$lines" | cnt_field 3)
+                when="?"
+                [ "$reset" != "-" ] && when=$(cnt_epoch_hhmm "$reset" 2>/dev/null || echo "?")
+                printf '\007continuum: %s%% used, resets at %s\n' "$util_i" "$when"
+                printf 'Wrap up, or: continuum resume %s "$PWD" "<task>"\n' \
+                       "$(cnt_epoch_hhmm "$reset" 90 2>/dev/null || echo "$when")"
+                return 0
+            fi
+            printf 'continuum: %s%% used, below %s%%\n' "$util_i" "$threshold"
+        fi
+        sleep "$every"
+    done
 }
 
 case "${1:-}" in
     status|"")  cmd_status ;;
     reset)      cmd_reset ;;
     providers)  cnt_providers ;;
+    watch)      shift; cmd_watch "$@" ;;
     resume)     shift; cmd_resume "$@" ;;
     -h|--help)  usage ;;
     *)          echo "continuum: unknown command '$1'" >&2; usage >&2; exit 1 ;;

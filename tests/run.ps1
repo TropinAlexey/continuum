@@ -45,6 +45,30 @@ Invoke-Continuum status *>$null
 if ($LASTEXITCODE -ne 0) { Ok "unknown provider fails" } else { Bad "unknown provider fails" "exit 0" }
 $env:CONTINUUM_PROVIDER = 'mock'
 
+Write-Host "resume:"
+function Dry ($tmpl, $prompt) {
+    $env:CONTINUUM_DRY_RUN = '1'
+    if ($tmpl) { $env:CONTINUUM_RESUME_CMD = $tmpl } elseif (Test-Path Env:CONTINUUM_RESUME_CMD) { Remove-Item Env:CONTINUUM_RESUME_CMD }
+    $out = Invoke-Continuum resume '23:59' $root $prompt
+    Remove-Item Env:CONTINUUM_DRY_RUN -ErrorAction SilentlyContinue
+    return ($out -join "`n")
+}
+Check "default agent is claude"   'claude --continue -p "finish it"' (Dry $null 'finish it')
+Check "swappable agent"           'pwsh exec "run it"'               (Dry 'pwsh exec "{prompt}"' 'run it')
+Check "template without {prompt}" 'pwsh --continue'                  (Dry 'pwsh --continue' 'ignored')
+if (Test-Path Env:CONTINUUM_RESUME_CMD) { Remove-Item Env:CONTINUUM_RESUME_CMD }
+
+# No dry run here: the PATH check only runs on the real scheduling path.
+$env:CONTINUUM_RESUME_CMD = 'nosuchagent {prompt}'
+Invoke-Continuum resume '23:59' $root 'x' *>$null
+if ($LASTEXITCODE -ne 0) { Ok "missing agent fails" } else { Bad "missing agent fails" "exit 0" }
+Remove-Item Env:CONTINUUM_RESUME_CMD -ErrorAction SilentlyContinue
+
+Write-Host "watch:"
+$env:CONTINUUM_MOCK = '91.0'
+Check "watch fires over threshold" "resets at" (Invoke-Continuum watch 1)
+Remove-Item Env:CONTINUUM_MOCK
+
 Write-Host "hook:"
 $out = Hook 'a' '{"session_id":"a"}'
 Check "blocks over threshold"  '"decision":"block"' $out
