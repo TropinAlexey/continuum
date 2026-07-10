@@ -1,13 +1,32 @@
 # continuum
 
-*See the limit coming. Decide what to do with what's left. Pick up where you stopped.*
+**See the limit coming. Decide what to do with what's left. Pick up where you stopped.**
 
-You are deep in a refactor. Claude goes quiet. `5-hour limit reached`. The context is gone,
-the plan was never written down, and tomorrow you start by reconstructing what you were doing.
+[![ci](https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg)](https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-continuum makes that not happen. When your usage window crosses a threshold — 80% by default —
-Claude does not just end its turn. It tells you where the work stopped and asks how you want to
-spend what remains:
+---
+
+It always happens at the worst moment.
+
+You are four files into a refactor. The tests are almost green. You and Claude have built up an
+hour of shared context — which functions are landmines, what the last migration broke, why that
+one `if` has to stay. Then the turn ends and there it is:
+
+> `5-hour limit reached · resets at 21:40`
+
+The context is gone. The plan lived in the conversation and the conversation is over. Tomorrow
+morning you will spend your first twenty minutes reconstructing what you already knew.
+
+The limit was never the problem. **Walking into it blind was.**
+
+## What continuum does
+
+It gives you the one thing that limit screen never does: *warning, and a choice.*
+
+When your usage window crosses a threshold — 80% by default — Claude doesn't quietly finish its
+turn and leave you to find out the hard way. It stops, tells you exactly where the work stands,
+and asks:
 
 ```
 The window is 86% used, resets at 21:40. What do we do?
@@ -19,8 +38,20 @@ The window is 86% used, resets at 21:40. What do we do?
     Carry on                    ignore this, I know what I'm doing
 ```
 
-Pick "save state and resume" and it commits, schedules `claude --continue` for 21:41, and
-tells you the PID. You close the laptop.
+Pick *"save state and resume"* and it commits your work, schedules `claude --continue` for
+21:41 with a description of the task you were on, and hands you the PID. You close the laptop.
+
+At 21:41, without you, the session picks the thread back up.
+
+Three moving parts, and you can read all of them in an afternoon:
+
+| | |
+|---|---|
+| **A hook** | Fires when Claude ends a turn. Once per session, at the threshold, it refuses to let the turn end silently. |
+| **A skill** | Teaches Claude what to do with that moment: summarize honestly, then ask you — never decide for you. |
+| **A scheduler** | Sleeps until the reset, then resumes the session where it stopped. |
+
+No daemon. No telemetry. No account. Nothing runs that you did not start.
 
 ## Install
 

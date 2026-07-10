@@ -29,7 +29,7 @@ function Format-Label {
 }
 
 function Invoke-Status {
-    foreach ($line in Read-CntUsage) {
+    foreach ($line in @(Read-CntUsage)) {
         $p = $line.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
         $when = '?'
         if ($p.Count -ge 3 -and $p[2] -ne '-') {
@@ -40,7 +40,7 @@ function Invoke-Status {
 }
 
 function Invoke-Reset {
-    $first = (Read-CntUsage)[0].Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+    $first = @(Read-CntUsage)[0].Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
     if ($first.Count -lt 3 -or $first[2] -eq '-') {
         throw "provider '$($script:CntProvider)' reports no reset time"
     }

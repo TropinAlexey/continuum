@@ -45,7 +45,9 @@ if (& $fresh $failed) { exit 0 }                # recently failed - do not retry
 if (& $fresh $cache) {
     $lines = @(Get-Content -Path $cache)
 } else {
-    try { $lines = Read-CntUsage }
+    # @() is load-bearing: a function returning a one-element array unrolls it to a
+    # scalar, and then $lines[0] would index into a string's characters.
+    try { $lines = @(Read-CntUsage) }
     catch { New-Item -ItemType File -Force -Path $failed | Out-Null; exit 0 }
     Set-Content -Path $cache -Value $lines
     Remove-Item -Path $failed -ErrorAction SilentlyContinue
