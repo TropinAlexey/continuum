@@ -22,24 +22,26 @@ function Hook ($cfg, $stdin) {
     $out = $stdin | & pwsh -NoProfile -File (Join-Path $root 'hooks/continuum-check.ps1') 2>$null
     return ($out -join '')
 }
-function Cli () {
+# NB: do not name this `Cli` - that is a built-in alias for Clear-Item, and
+# aliases outrank functions in PowerShell's command resolution.
+function Invoke-Continuum {
     & pwsh -NoProfile -File (Join-Path $root 'bin/continuum.ps1') @args 2>$null
 }
 
 Write-Host "cli:"
-Check "status lists both windows" "5 hours" (Cli status)
-Check "status shows weekly"       "7 days"  (Cli status)
-Check "providers lists mock"      "mock"    (Cli providers)
-Check "reset prints HH:MM"        ":"       (Cli reset)
+Check "status lists both windows" "5 hours" (Invoke-Continuum status)
+Check "status shows weekly"       "7 days"  (Invoke-Continuum status)
+Check "providers lists mock"      "mock"    (Invoke-Continuum providers)
+Check "reset prints HH:MM"        ":"       (Invoke-Continuum reset)
 
 $env:CONTINUUM_MOCK_FAIL = '1'
-Cli status *>$null
+Invoke-Continuum status *>$null
 if ($LASTEXITCODE -ne 0) { Ok "status fails when provider fails" }
 else { Bad "status fails when provider fails" "exit 0" }
 Remove-Item Env:CONTINUUM_MOCK_FAIL
 
 $env:CONTINUUM_PROVIDER = 'nope'
-Cli status *>$null
+Invoke-Continuum status *>$null
 if ($LASTEXITCODE -ne 0) { Ok "unknown provider fails" } else { Bad "unknown provider fails" "exit 0" }
 $env:CONTINUUM_PROVIDER = 'mock'
 
