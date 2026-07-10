@@ -1,4 +1,3 @@
-.usage-cache.json
-.usage-cache.fail
-.budget-warned-*
-auto-resume.log
+.continuum-cache-*
+.continuum-warned-*
+continuum-resume.log

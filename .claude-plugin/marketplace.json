@@ -1,14 +1,14 @@
 {
-  "name": "token-budget",
+  "name": "continuum",
   "owner": {
     "name": "Alexey Tropin",
     "url": "https://github.com/TropinAlexey"
   },
   "plugins": [
     {
-      "name": "token-budget",
+      "name": "continuum",
       "source": "./",
-      "description": "Warns before the Claude Code usage limit, plans the remaining budget with you, and can auto-resume after the reset"
+      "description": "See the usage limit coming, plan the rest of the window, and resume after the reset"
     }
   ]
 }

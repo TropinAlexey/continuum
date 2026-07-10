@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # The POSIX sh implementation: macOS, Linux, and Windows via Git Bash
+  # (which is what Claude Code uses for hooks on Windows when it is present).
+  sh:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        if: runner.os == 'Linux'
+        # SC1090/SC1091: sourced paths are resolved at runtime, shellcheck cannot follow them.
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck -s sh -S warning -e SC1090,SC1091 \
+            bin/continuum hooks/continuum-check.sh lib/core.sh providers/*.sh tests/run.sh
+      - name: tests
+        shell: bash
+        run: sh tests/run.sh
+
+  # The PowerShell implementation: what Claude Code falls back to on Windows
+  # when Git Bash is not installed. Also run on Linux/macOS to catch path bugs.
+  powershell:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: analyzer
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $r = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error
+          if ($r) { $r | Format-Table -AutoSize; exit 1 }
+      - name: tests
+        shell: pwsh
+        run: pwsh tests/run.ps1

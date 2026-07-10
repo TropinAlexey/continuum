@@ -1,0 +1,84 @@
+#!/bin/sh
+# continuum - see the limit coming, decide what to do, pick up where you stopped.
+#
+#   continuum status            utilization of every window the provider reports
+#   continuum reset             local HH:MM when the primary window rolls over (+90s)
+#   continuum providers         list available providers
+#   continuum resume HH:MM [dir] [prompt]
+#                               schedule `claude --continue` for after the reset
+#
+#   CONTINUUM_PROVIDER=mock continuum status     pick a provider (default: anthropic)
+set -eu
+
+# Resolve lib/ whether we run in place, via a PATH symlink, or from a plugin install.
+self="$0"; link=$(readlink "$self" 2>/dev/null) && [ -n "$link" ] && case "$link" in
+    /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;;
+esac
+for d in "$(dirname "$self")/../lib" "${CLAUDE_PLUGIN_ROOT:-}/lib" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lib"; do
+    [ -f "$d/core.sh" ] && . "$d/core.sh" && break
+done
+command -v cnt_read >/dev/null 2>&1 || { echo "continuum: lib/core.sh not found" >&2; exit 1; }
+
+usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; }
+
+label() {  # pretty names for the windows a provider reports
+    case "$1" in
+        5h) printf '5 hours ' ;; 7d) printf '7 days  ' ;;
+        *)  printf '%-8s' "$1" ;;
+    esac
+}
+
+# Capture before piping: `cnt_read | while` would hide the provider's exit status
+# behind the loop's, and a caller checking `continuum status` would see success.
+cmd_status() {
+    lines=$(cnt_read) || exit 1
+    printf '%s\n' "$lines" | while read -r window util reset; do
+        [ -z "$window" ] && continue
+        when="?"
+        [ "$reset" != "-" ] && when=$(cnt_epoch_hhmm "$reset" 2>/dev/null || echo "?")
+        printf '%s %5s%%   resets at %s\n' "$(label "$window")" "$util" "$when"
+    done
+}
+
+cmd_reset() {
+    lines=$(cnt_read) || exit 1
+    # +90s margin: wake up after the reset, not a second before it
+    reset=$(printf '%s\n' "$lines" | cnt_field 3)
+    if [ -z "$reset" ] || [ "$reset" = "-" ]; then
+        echo "provider '$CNT_PROVIDER' reports no reset time" >&2; exit 1
+    fi
+    cnt_epoch_hhmm "$reset" 90
+}
+
+cmd_resume() {
+    T="${1:-}"; [ -n "$T" ] || { echo "continuum resume: need HH:MM" >&2; exit 1; }
+    DIR="${2:-$PWD}"
+    PROMPT="${3:-continue, please}"
+    LOG="$CNT_CFG/continuum-resume.log"
+
+    command -v claude >/dev/null 2>&1 || { echo "\`claude\` not found in PATH" >&2; exit 1; }
+    [ -d "$DIR" ] || { echo "no such directory: $DIR" >&2; exit 1; }
+    CLAUDE_BIN=$(command -v claude)
+
+    delay=$(cnt_hhmm_delay "$T") || exit 1
+    mkdir -p "$CNT_CFG" 2>/dev/null || true
+    printf '\n=== scheduled %s for %s in %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$T" "$DIR" >> "$LOG"
+
+    # Detached: survives closing the terminal, does NOT survive a reboot.
+    nohup sh -c 'sleep "$1"; cd "$2" || exit 1; exec "$3" --continue -p "$4" --permission-mode acceptEdits' \
+        _ "$delay" "$DIR" "$CLAUDE_BIN" "$PROMPT" >> "$LOG" 2>&1 &
+    pid=$!
+
+    printf 'Resuming in %s min (at %s) in %s: "%s"\n' "$(( delay / 60 ))" "$T" "$DIR" "$PROMPT"
+    printf 'Scheduled, PID %s. Cancel: kill %s   Log: %s\n' "$pid" "$pid" "$LOG"
+    printf 'It runs headless with acceptEdits - it will edit code unattended.\n'
+}
+
+case "${1:-}" in
+    status|"")  cmd_status ;;
+    reset)      cmd_reset ;;
+    providers)  cnt_providers ;;
+    resume)     shift; cmd_resume "$@" ;;
+    -h|--help)  usage ;;
+    *)          echo "continuum: unknown command '$1'" >&2; usage >&2; exit 1 ;;
+esac

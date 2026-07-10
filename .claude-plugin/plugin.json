@@ -1,14 +1,21 @@
 {
-  "name": "token-budget",
-  "description": "Warns before you hit the Claude Code usage limit, agrees a plan for the remaining budget, and can resume the session automatically after the window resets",
+  "name": "continuum",
+  "description": "See the usage limit coming, decide together what to do with what is left, and pick up where you stopped. Provider-agnostic.",
   "version": "0.1.0",
   "author": {
     "name": "Alexey Tropin",
     "url": "https://github.com/TropinAlexey"
   },
-  "homepage": "https://github.com/TropinAlexey/claude-token-budget",
-  "repository": "https://github.com/TropinAlexey/claude-token-budget",
+  "homepage": "https://github.com/TropinAlexey/continuum",
+  "repository": "https://github.com/TropinAlexey/continuum",
   "license": "MIT",
-  "keywords": ["usage", "token-limit", "budget", "hooks", "auto-resume", "claude-code"],
+  "keywords": [
+    "usage",
+    "rate-limit",
+    "budget",
+    "hooks",
+    "auto-resume",
+    "claude-code"
+  ],
   "skills": "./skills/"
 }

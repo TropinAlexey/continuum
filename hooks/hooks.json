@@ -5,7 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/token-budget-check.sh\""
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/continuum-check.sh\"",
+            "shell": "bash"
           }
         ]
       }
