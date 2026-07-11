@@ -22,7 +22,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
           shellcheck -s sh -S warning -e SC1090,SC1091 \
-            bin/continuum hooks/continuum-check.sh lib/core.sh providers/*.sh tests/run.sh
+            bin/continuum hooks/continuum-check.sh lib/core.sh providers/*.sh tests/run.sh install.sh
       - name: tests
         shell: bash
         run: sh tests/run.sh

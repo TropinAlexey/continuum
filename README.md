@@ -7,6 +7,44 @@
 
 ---
 
+## Explain it like I'm five
+
+Your AI helper runs on a battery. When the battery runs out, it stops in the middle of what
+it's doing — and forgets what you were both working on.
+
+**continuum is a battery light.** It watches the battery, and when it's getting low it taps the
+helper on the shoulder and says: *"Almost empty. Should we finish up, or take a nap and start
+again when it's charged?"*
+
+If you say *"take a nap,"* continuum remembers exactly where you were, waits for the battery to
+fill back up, and quietly starts the helper again — right where you left off. You don't have to
+watch. You don't have to remember anything.
+
+That's the whole thing. A light, a question, and a nap that ends by itself.
+
+## Install in one line
+
+Copy the line for your computer, paste it into your terminal, press Enter.
+
+**Mac or Linux**
+```sh
+curl -fsSL https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.sh | sh
+```
+
+**Windows** (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | iex
+```
+
+Then type `continuum status` to see how much battery is left.
+
+> **A fair warning, in plain words:** that command downloads a script from the internet and runs
+> it. That is convenient but you are trusting it. If you'd rather look first — good instinct —
+> open the [install.sh](install.sh) / [install.ps1](install.ps1) file, read it (it's short), and
+> run it yourself. It only copies files into a folder and adds one command to your PATH.
+
+---
+
 It always happens at the worst moment.
 
 You are four files into a refactor. The tests are almost green. You and Claude have built up an
@@ -53,19 +91,22 @@ Three moving parts, and you can read all of them in an afternoon:
 
 No daemon. No telemetry. No account. Nothing runs that you did not start.
 
-## Install
+## Two ways to install, pick one
+
+**The one-liner above** gives you the `continuum` command in any terminal. It works with any AI
+agent, and it's all you need for `continuum status`, `continuum watch`, and `continuum resume`.
+
+**The Claude Code plugin** additionally gives you the *automatic* tap-on-the-shoulder — the part
+where Claude stops by itself at the threshold and asks you what to do. Run this inside Claude
+Code:
 
 ```
 /plugin marketplace add TropinAlexey/continuum
 /plugin install continuum
 ```
 
-The hook works immediately. To also get the CLI on your `PATH` — the skills use it, and it is
-useful on its own:
-
-```sh
-ln -s "$(find ~/.claude/plugins -path '*continuum/bin/continuum' | head -1)" /usr/local/bin/continuum
-```
+Want both? Do both — the one-liner for the command, the plugin for the automatic warning. They
+don't conflict.
 
 ## Use
 
