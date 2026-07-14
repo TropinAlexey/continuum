@@ -33,6 +33,21 @@ if CONTINUUM_PROVIDER=nope sh "$ROOT/bin/continuum" status >/dev/null 2>&1
 then bad "unknown provider fails" "exit 0"
 else ok  "unknown provider fails"; fi
 
+# install.sh puts a symlink on PATH, so $0 is the link, not the checkout. Without
+# CLAUDE_PLUGIN_ROOT (the plugin-only escape hatch) the root has to come from it.
+ln -s "$ROOT/bin/continuum" "$TMP/continuum-link"
+out=$(unset CLAUDE_PLUGIN_ROOT; sh "$TMP/continuum-link" providers 2>&1)
+check "runs through a PATH symlink" "mock" "$out"
+
+echo "json:"
+# The credential store holds an accessToken per MCP OAuth server as well as ours,
+# all on one line. A greedy sed would return the LAST one - a token for some other
+# host, which the usage endpoint rejects with a 401.
+two='{"claudeAiOauth":{"accessToken":"ours","expiresAt":1},"mcpOAuth":{"x":{"accessToken":"theirs"}}}'
+. "$ROOT/lib/core.sh"
+check "reads the first accessToken" "ours" "$(printf '%s' "$two" | cnt_json_str accessToken)"
+check "block reader scopes the key"  "ours" "$(printf '%s' "$two" | cnt_json_block claudeAiOauth | cnt_json_str accessToken)"
+
 echo "resume:"
 dry() { CONTINUUM_DRY_RUN=1 CONTINUUM_RESUME_CMD="$1" sh "$ROOT/bin/continuum" resume 23:59 "$ROOT" "$2" 2>&1; }
 check "default agent is claude"   'claude --continue -p "finish it"' "$(dry '' 'finish it')"

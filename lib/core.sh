@@ -17,7 +17,9 @@
 #
 # Providers may source this file for the helpers below.
 
-CNT_ROOT="${CLAUDE_PLUGIN_ROOT:-$(dirname "$(dirname "$0")")}"
+# $0 is the caller, which may be a PATH symlink pointing here; a caller that has
+# already resolved its own location passes CNT_ROOT in.
+CNT_ROOT="${CLAUDE_PLUGIN_ROOT:-${CNT_ROOT:-$(dirname "$(dirname "$0")")}}"
 CNT_CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 CNT_PROVIDER="${CONTINUUM_PROVIDER:-anthropic}"
 
@@ -54,9 +56,12 @@ cnt_read() {
 cnt_field() { awk -v n="$1" 'NR==1{print $n}'; }
 
 # --- tiny JSON readers (flat scalar extraction; enough for these APIs) ---
-cnt_json_str() { sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1; }
-cnt_json_num() { sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*\([0-9.]*\).*/\1/p' | head -1; }
-cnt_json_block() { sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*{\([^{}]*\)}.*/\1/p' | head -1; }
+# grep -o, not sed: a leading `.*` is greedy, so on a one-line document with the
+# key repeated (credentials.json has an accessToken per OAuth server) sed returns
+# the LAST one. These return the first.
+cnt_json_str() { grep -o '"'"$1"'"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"//; s/"$//'; }
+cnt_json_num() { grep -o '"'"$1"'"[[:space:]]*:[[:space:]]*[0-9][0-9.]*' | head -1 | sed 's/.*:[[:space:]]*//'; }
+cnt_json_block() { grep -o '"'"$1"'"[[:space:]]*:[[:space:]]*{[^{}]*}' | head -1 | sed 's/^[^{]*{//; s/}$//'; }
 
 # --- portable date math (GNU and BSD) ----------------------------------
 # cnt_iso_epoch "2026-07-09T17:40:00.180+00:00" -> unix epoch (UTC input)

@@ -33,7 +33,8 @@ _token() {
         raw=$(cat "$CNT_CFG/.credentials.json")
     fi
     [ -z "$raw" ] && return 1
-    printf '%s' "$raw" | cnt_json_str accessToken
+    # The store also holds an accessToken per MCP OAuth server; take ours.
+    printf '%s' "$raw" | cnt_json_block claudeAiOauth | cnt_json_str accessToken
 }
 
 tok=$(_token) || { echo "no OAuth token found - are you logged in to Claude Code?" >&2; exit 1; }
