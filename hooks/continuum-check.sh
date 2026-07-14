@@ -66,8 +66,10 @@ case "$util_i" in ''|*[!0-9]*) exit 0 ;; esac
 
 # Highest tier the current utilization has reached (tiers below the floor are ignored).
 tier=0
+tiers=""                                       # active tiers, for the message
 for t in ${CONTINUUM_TIERS:-80 90 95 99}; do
     [ "$t" -lt "$threshold" ] && continue
+    tiers="${tiers:+$tiers/}$t"
     [ "$util_i" -ge "$t" ] && [ "$t" -gt "$tier" ] && tier=$t
 done
 [ "$tier" -eq 0 ] && exit 0                   # below the floor
@@ -83,5 +85,5 @@ printf '%s' "$tier" > "$flag"
 
 # Stop hook contract: {"decision":"block","reason":"..."} feeds the reason back to Claude.
 cat <<EOF
-{"decision":"block","reason":"[continuum] The primary usage window is ${util_i}% used (crossed the ${tier}% tier)${when:+, resets at ${when}}${rest:+. Also: ${rest}}. Do not end the turn silently: run the session-budget skill - briefly state where we stopped, then use AskUserQuestion to ask the user how to spend the rest of the window, offering the options from that skill. This fires once per tier (80/90/95/99), so the next warning only comes if usage climbs into the next tier."}
+{"decision":"block","reason":"[continuum] The primary usage window is ${util_i}% used (crossed the ${tier}% tier)${when:+, resets at ${when}}${rest:+. Also: ${rest}}. Do not end the turn silently: run the session-budget skill - briefly state where we stopped, then use AskUserQuestion to ask the user how to spend the rest of the window, offering the options from that skill. This fires once per tier (${tiers}), so the next warning only comes if usage climbs into the next tier."}
 EOF

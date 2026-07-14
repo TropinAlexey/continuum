@@ -96,7 +96,6 @@ check "single-window provider" '"decision":"block"' "$out"
 case "$out" in *"Also:"*) bad "no phantom second window" "$out" ;; *) ok "no phantom second window" ;; esac
 
 # Escalating tiers: each of 80/90/95/99 fires once as usage climbs, and only upward.
-# CACHE_MIN=0 keeps the cache stale so each call re-reads the (changing) mock.
 # CONTINUUM_CACHE_MIN=0 disables the cache, so each call re-reads the changing mock.
 esc() { CONTINUUM_CACHE_MIN=0 CONTINUUM_MOCK="$1" hook esc '{"session_id":"esc"}'; }
 check "tier 80 warns"          "80% tier" "$(esc 82.0)"
@@ -104,6 +103,11 @@ check "tier 80 warns"          "80% tier" "$(esc 82.0)"
 check "tier 95 warns next"     "95% tier" "$(esc 96.0)"
 [ -z "$(esc 96.0)" ] && ok "same tier warns once" || bad "same tier warns once" "warned twice at 96%"
 check "tier 99 warns last"     "99% tier" "$(esc 99.0)"
+
+# The "fires once per tier (...)" line reflects the configured tiers, not a hardcoded list.
+out=$(CONTINUUM_TIERS="50 75" CONTINUUM_THRESHOLD=50 CONTINUUM_MOCK="80.0" hook cti '{"session_id":"cti"}')
+check "message lists configured tiers"   "once per tier (50/75)" "$out"
+case "$out" in *"80/90/95/99"*) bad "no hardcoded tier list" "$out" ;; *) ok "no hardcoded tier list" ;; esac
 
 # A custom floor drops the tiers beneath it.
 out=$(CONTINUUM_THRESHOLD=90 CONTINUUM_MOCK="85.0" hook flr '{"session_id":"flr"}')
