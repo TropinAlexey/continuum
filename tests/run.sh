@@ -35,9 +35,14 @@ else ok  "unknown provider fails"; fi
 
 # install.sh puts a symlink on PATH, so $0 is the link, not the checkout. Without
 # CLAUDE_PLUGIN_ROOT (the plugin-only escape hatch) the root has to come from it.
-ln -s "$ROOT/bin/continuum" "$TMP/continuum-link"
-out=$(unset CLAUDE_PLUGIN_ROOT; sh "$TMP/continuum-link" providers 2>&1)
-check "runs through a PATH symlink" "mock" "$out"
+# Git Bash on Windows copies instead of linking, and install.sh is POSIX-only
+# anyway - there is nothing to assert there.
+if ln -s "$ROOT/bin/continuum" "$TMP/continuum-link" 2>/dev/null && [ -L "$TMP/continuum-link" ]; then
+    out=$(unset CLAUDE_PLUGIN_ROOT; sh "$TMP/continuum-link" providers 2>&1)
+    check "runs through a PATH symlink" "mock" "$out"
+else
+    printf '  skip runs through a PATH symlink (no symlink support)\n'
+fi
 
 echo "json:"
 # The credential store holds an accessToken per MCP OAuth server as well as ours,

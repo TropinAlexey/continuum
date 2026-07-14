@@ -17,7 +17,11 @@ self="$0"; link=$(readlink "$self" 2>/dev/null) && [ -n "$link" ] && case "$link
     /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;;
 esac
 for d in "$(dirname "$self")/../lib" "${CLAUDE_PLUGIN_ROOT:-}/lib" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lib"; do
-    [ -f "$d/core.sh" ] && CNT_ROOT=$(cd "$d/.." && pwd) && . "$d/core.sh" && break
+    [ -f "$d/core.sh" ] || continue
+    CNT_ROOT=$(cd "$d/.." && pwd)   # core.sh cannot find this itself: $0 is the caller
+    export CNT_ROOT
+    . "$d/core.sh"
+    break
 done
 command -v cnt_read >/dev/null 2>&1 || { echo "continuum: lib/core.sh not found" >&2; exit 1; }
 
