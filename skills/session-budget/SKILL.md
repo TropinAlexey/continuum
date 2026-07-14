@@ -27,12 +27,16 @@ A resumed session — or the user tomorrow — has none of your context. Write f
 
 ## 3. Ask the user via AskUserQuestion
 
+Ask in the language the user has been speaking, not necessarily English — translate the
+question and every option label accordingly.
+
 Question: "The window is N% used, resets at HH:MM. What do we do?"
 Offer 3-4 options that fit the moment, recommended one first:
 
 | Option | What I do |
 |---|---|
 | **Finish and wrap up** | Bring the current task to a working state, run the tests, show the diff. No new work. |
+| **Finish the task set, then stop** | Complete the remaining planned tasks (the current TODO batch), then stop — no new scope. Offer this only when what's left is a bounded, known set that plausibly fits the remaining window; skip it if the work is open-ended. |
 | **Save state and schedule a resume** | Commit or stash, then `continuum resume "$(continuum reset)" "$PWD" "<specific task>"` so the session continues itself after the reset. |
 | **Frugal mode** | Keep going, but: no subagents, no large files into context, short answers. Suggest `/compact`. |
 | **Cheap tasks only** | Spend the rest on docs, commit messages, README; postpone heavy code analysis. |
@@ -48,7 +52,10 @@ and cannot ask follow-up questions.
 
 ## Settings
 
-- Threshold: `CONTINUUM_THRESHOLD` (default 80).
+- Threshold floor: `CONTINUUM_THRESHOLD` (default 80).
+- Tiers: `CONTINUUM_TIERS` (default `80 90 95 99`).
 - Provider: `CONTINUUM_PROVIDER` (default `anthropic`).
 - Disable the hook: `CONTINUUM_OFF=1`.
-- The warning fires once per session (flag `~/.claude/.continuum-warned-<session_id>`).
+- Fires once per tier crossed, not once per session: after 80% it stays quiet until usage
+  reaches 90%, then 95%, then 99% (flag `~/.claude/.continuum-warned-<session_id>` holds the
+  highest tier already warned).

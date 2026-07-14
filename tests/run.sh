@@ -95,6 +95,19 @@ out=$(CONTINUUM_MOCK="93.2" hook e '{"session_id":"e"}')
 check "single-window provider" '"decision":"block"' "$out"
 case "$out" in *"Also:"*) bad "no phantom second window" "$out" ;; *) ok "no phantom second window" ;; esac
 
+# Escalating tiers: each of 80/90/95/99 fires once as usage climbs, and only upward.
+# CACHE_MIN=0 keeps the cache stale so each call re-reads the (changing) mock.
+esc() { rm -f "$TMP/esc/.continuum-cache-mock"; CONTINUUM_MOCK="$1" hook esc '{"session_id":"esc"}'; }
+check "tier 80 warns"          "80% tier" "$(esc 82.0)"
+[ -z "$(esc 88.0)" ] && ok "quiet between tiers" || bad "quiet between tiers" "warned again at 88%"
+check "tier 95 warns next"     "95% tier" "$(esc 96.0)"
+[ -z "$(esc 96.0)" ] && ok "same tier warns once" || bad "same tier warns once" "warned twice at 96%"
+check "tier 99 warns last"     "99% tier" "$(esc 99.0)"
+
+# A custom floor drops the tiers beneath it.
+out=$(CONTINUUM_THRESHOLD=90 CONTINUUM_MOCK="85.0" hook flr '{"session_id":"flr"}')
+[ -z "$out" ] && ok "floor silences lower tiers" || bad "floor silences lower tiers" "$out"
+
 out=$(CONTINUUM_MOCK_FAIL=1 hook c '{"session_id":"c"}')
 [ -z "$out" ] && ok "silent when provider fails" || bad "silent when provider fails" "$out"
 [ -f "$TMP/c/.continuum-cache-mock.fail" ] && ok "negative cache written" || bad "negative cache written" "missing"

@@ -1,8 +1,10 @@
 #!/bin/sh
-# Stop hook: once per session, when the primary usage window crosses the threshold,
-# tell Claude to stop and agree a plan with the user instead of ending the turn.
+# Stop hook: as the primary usage window fills, tell Claude to stop and agree a plan
+# with the user instead of ending the turn. Fires once per tier crossed (80/90/95/99
+# by default), not once per turn - escalating, but never nagging: each tier warns once.
 #
-#   CONTINUUM_THRESHOLD   percent, default 80
+#   CONTINUUM_THRESHOLD   floor percent, default 80 (tiers at/above it stay active)
+#   CONTINUUM_TIERS       space-separated tiers, default "80 90 95 99"
 #   CONTINUUM_PROVIDER    which provider to ask, default anthropic
 #   CONTINUUM_OFF=1       disable
 set -eu
@@ -24,8 +26,11 @@ sid=$(printf '%s' "$event" | cnt_json_str session_id)
 # A Stop hook that exits non-zero spams the user, so never let a missing dir fail us.
 mkdir -p "$CNT_CFG" 2>/dev/null || exit 0
 
+# The flag records the highest tier already warned this session, so each tier fires once.
 flag="$CNT_CFG/.continuum-warned-$sid"
-[ -f "$flag" ] && exit 0                     # warn only once per session
+warned=0
+[ -f "$flag" ] && warned=$(cat "$flag")
+case "$warned" in ''|*[!0-9]*) warned=0 ;; esac
 
 # The hook runs after every turn, but providers hit rate-limited endpoints, so cache
 # aggressively and back off after a failure ("negative cache").
@@ -54,7 +59,15 @@ reset=$(printf '%s\n' "$lines" | cnt_field 3)
 threshold="${CONTINUUM_THRESHOLD:-80}"
 util_i=${util%%.*}                            # integer compare (utilization can be "46.0")
 case "$util_i" in ''|*[!0-9]*) exit 0 ;; esac
-[ "$util_i" -lt "$threshold" ] && exit 0
+
+# Highest tier the current utilization has reached (tiers below the floor are ignored).
+tier=0
+for t in ${CONTINUUM_TIERS:-80 90 95 99}; do
+    [ "$t" -lt "$threshold" ] && continue
+    [ "$util_i" -ge "$t" ] && [ "$t" -gt "$tier" ] && tier=$t
+done
+[ "$tier" -eq 0 ] && exit 0                   # below the floor
+[ "$tier" -le "$warned" ] && exit 0           # already warned at this tier or higher
 
 when=""
 [ -n "$reset" ] && [ "$reset" != "-" ] && when=$(cnt_epoch_hhmm "$reset" 2>/dev/null || echo "")
@@ -62,9 +75,9 @@ when=""
 # Any window beyond the first, for context ("weekly window 41.0%").
 rest=$(printf '%s\n' "$lines" | awk 'NR>1 {printf "%s window %s%%, ", $1, $2}' | sed 's/, $//')
 
-printf '%s' "$util_i" > "$flag"
+printf '%s' "$tier" > "$flag"
 
 # Stop hook contract: {"decision":"block","reason":"..."} feeds the reason back to Claude.
 cat <<EOF
-{"decision":"block","reason":"[continuum] The primary usage window is ${util_i}% used (threshold ${threshold}%)${when:+, resets at ${when}}${rest:+. Also: ${rest}}. Do not end the turn silently: run the session-budget skill - briefly state where we stopped, then use AskUserQuestion to ask the user how to spend the rest of the window, offering the options from that skill. This warning fires once per session."}
+{"decision":"block","reason":"[continuum] The primary usage window is ${util_i}% used (crossed the ${tier}% tier)${when:+, resets at ${when}}${rest:+. Also: ${rest}}. Do not end the turn silently: run the session-budget skill - briefly state where we stopped, then use AskUserQuestion to ask the user how to spend the rest of the window, offering the options from that skill. This fires once per tier (80/90/95/99), so the next warning only comes if usage climbs into the next tier."}
 EOF
