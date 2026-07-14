@@ -21,7 +21,10 @@ printf '\ncontinuum installer\n\n'
 
 # --- 1. get the files -------------------------------------------------
 # Prefer running from a clone; otherwise download.
-here=$(unset CDPATH; cd -- "$(dirname -- "$0")" 2>/dev/null && pwd) || here=""
+# Piped from curl, $0 is "sh" and dirname is "." - the current directory, which is
+# not a source of anything. Only trust $0 when it is the script we are running.
+here=""
+[ -f "$0" ] && here=$(unset CDPATH; cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)
 if [ -n "$here" ] && [ -f "$here/bin/continuum" ]; then
     say "copying from $here"
     mkdir -p "$DEST"

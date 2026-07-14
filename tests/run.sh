@@ -48,6 +48,18 @@ two='{"claudeAiOauth":{"accessToken":"ours","expiresAt":1},"mcpOAuth":{"x":{"acc
 check "reads the first accessToken" "ours" "$(printf '%s' "$two" | cnt_json_str accessToken)"
 check "block reader scopes the key"  "ours" "$(printf '%s' "$two" | cnt_json_block claudeAiOauth | cnt_json_str accessToken)"
 
+echo "install:"
+# `curl | sh` must fetch the repo, never scoop up whatever the current directory
+# happens to be. Run it piped from inside a checkout, behind a git that refuses to
+# clone: reaching that git at all proves it did not take the cwd, and it keeps the
+# test off the network. (Trimming PATH would not hide git - it lives in /usr/bin.)
+mkdir -p "$TMP/fakebin"
+printf '#!/bin/sh\nexit 1\n' > "$TMP/fakebin/git"; chmod +x "$TMP/fakebin/git"
+out=$(cd "$ROOT" && PATH="$TMP/fakebin:$PATH" CONTINUUM_HOME="$TMP/inst" sh < "$ROOT/install.sh" 2>&1 || true)
+check "piped install ignores the cwd" "git clone failed" "$out"
+case "$out" in *"copying from"*) bad "piped install never copies the cwd" "$out" ;;
+                              *) ok  "piped install never copies the cwd" ;; esac
+
 echo "resume:"
 dry() { CONTINUUM_DRY_RUN=1 CONTINUUM_RESUME_CMD="$1" sh "$ROOT/bin/continuum" resume 23:59 "$ROOT" "$2" 2>&1; }
 check "default agent is claude"   'claude --continue -p "finish it"' "$(dry '' 'finish it')"
