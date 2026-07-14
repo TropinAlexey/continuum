@@ -1,7 +1,7 @@
 {
   "name": "continuum",
   "description": "See the usage limit coming, decide together what to do with what is left, and pick up where you stopped. Provider-agnostic.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "Alexey Tropin",
     "url": "https://github.com/TropinAlexey"
