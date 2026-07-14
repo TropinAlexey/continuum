@@ -62,19 +62,23 @@ The limit was never the problem. **Walking into it blind was.**
 
 It gives you the one thing that limit screen never does: *warning, and a choice.*
 
-When your usage window crosses a threshold — 80% by default — Claude doesn't quietly finish its
-turn and leave you to find out the hard way. It stops, tells you exactly where the work stands,
-and asks:
+When your usage window fills up, Claude doesn't quietly finish its turn and leave you to find
+out the hard way. It stops, tells you exactly where the work stands, and asks:
 
 ```
 The window is 86% used, resets at 21:40. What do we do?
 
   > Finish and wrap up          bring it to a working state, run the tests, show the diff
+    Finish the task set, stop   complete the planned batch, then stop — no new scope
     Save state and resume       commit, then schedule the session to continue itself at 21:40
     Frugal mode                 no subagents, no big files, short answers
     Cheap tasks only            docs and commit messages, postpone the heavy analysis
     Carry on                    ignore this, I know what I'm doing
 ```
+
+It asks in whatever language you've been working in. And it doesn't nag: the warning steps
+up through **80% → 90% → 95% → 99%**, firing once at each tier as the window fills — never
+twice for the same tier, never on every turn.
 
 Pick *"save state and resume"* and it commits your work, schedules `claude --continue` for
 21:41 with a description of the task you were on, and hands you the PID. You close the laptop.
@@ -85,7 +89,7 @@ Three moving parts, and you can read all of them in an afternoon:
 
 | | |
 |---|---|
-| **A hook** | Fires when Claude ends a turn. Once per session, at the threshold, it refuses to let the turn end silently. |
+| **A hook** | Fires when Claude ends a turn. Once per tier (80/90/95/99), it refuses to let the turn end silently. |
 | **A skill** | Teaches Claude what to do with that moment: summarize honestly, then ask you — never decide for you. |
 | **A scheduler** | Sleeps until the reset, then resumes the session where it stopped. |
 
@@ -198,12 +202,13 @@ Without Git Bash, override the hook in your `settings.json`:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CONTINUUM_THRESHOLD` | `80` | Percent of the primary window that triggers the warning. |
+| `CONTINUUM_THRESHOLD` | `80` | Floor percent of the primary window. Tiers below it are dropped. |
+| `CONTINUUM_TIERS` | `80 90 95 99` | Warning tiers. Each fires once, as the window climbs into it. |
 | `CONTINUUM_PROVIDER` | `anthropic` | Which provider to ask. |
 | `CONTINUUM_RESUME_CMD` | `claude --continue -p "{prompt}" …` | Which agent `resume` wakes up. `{prompt}` is the task. |
 | `CONTINUUM_DRY_RUN` | unset | `resume` prints the command instead of scheduling it. |
 | `CONTINUUM_OFF` | unset | Set to anything to disable the hook. |
-| `CONTINUUM_CACHE_MIN` | `10` | Minutes to cache a provider response. |
+| `CONTINUUM_CACHE_MIN` | `10` | Minutes to cache a provider response. `0` disables the cache. |
 
 ## How it works
 

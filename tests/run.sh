@@ -97,7 +97,8 @@ case "$out" in *"Also:"*) bad "no phantom second window" "$out" ;; *) ok "no pha
 
 # Escalating tiers: each of 80/90/95/99 fires once as usage climbs, and only upward.
 # CACHE_MIN=0 keeps the cache stale so each call re-reads the (changing) mock.
-esc() { rm -f "$TMP/esc/.continuum-cache-mock"; CONTINUUM_MOCK="$1" hook esc '{"session_id":"esc"}'; }
+# CONTINUUM_CACHE_MIN=0 disables the cache, so each call re-reads the changing mock.
+esc() { CONTINUUM_CACHE_MIN=0 CONTINUUM_MOCK="$1" hook esc '{"session_id":"esc"}'; }
 check "tier 80 warns"          "80% tier" "$(esc 82.0)"
 [ -z "$(esc 88.0)" ] && ok "quiet between tiers" || bad "quiet between tiers" "warned again at 88%"
 check "tier 95 warns next"     "95% tier" "$(esc 96.0)"

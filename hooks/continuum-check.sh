@@ -38,11 +38,15 @@ cache="$CNT_CFG/.continuum-cache-$CNT_PROVIDER"
 failed="$cache.fail"
 ttl="${CONTINUUM_CACHE_MIN:-10}"
 
-if [ -f "$failed" ] && [ -n "$(find "$failed" -mmin "-$ttl" 2>/dev/null)" ]; then
+# fresh <file> -> true if the file was modified within ttl minutes. ttl=0 disables the
+# cache: `find -mmin -0` counts a just-written file as fresh, so guard it explicitly.
+fresh() { [ "$ttl" -gt 0 ] && [ -f "$1" ] && [ -n "$(find "$1" -mmin "-$ttl" 2>/dev/null)" ]; }
+
+if fresh "$failed"; then
     exit 0                                    # recently failed - do not retry yet
 fi
 
-if [ -f "$cache" ] && [ -n "$(find "$cache" -mmin "-$ttl" 2>/dev/null)" ]; then
+if fresh "$cache"; then
     lines=$(cat "$cache")
 else
     # offline / rate limited / no token -> stay silent, remember the failure
