@@ -98,15 +98,25 @@ cmd_resume() {
     printf '\n=== scheduled %s for %s in %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$T" "$DIR" >> "$LOG"
 
     # Detached: survives closing the terminal, does NOT survive a reboot.
-    # Header/footer are re-printed at actual run time (not just at scheduling)
-    # with DIR, so concurrent resumes across projects stay attributable in the
-    # shared log even when they finish out of order.
+    # Header/footer are re-printed at actual run time (not just at scheduling) with DIR, so
+    # concurrent resumes across projects stay attributable in the shared log even when they
+    # finish out of order. Not `exec` for the final command - we need control back afterward
+    # to print the footer and fire a desktop notification, since nothing else is watching a
+    # process that runs unattended for hours.
     nohup sh -c '
         sleep "$1"
-        cd "$2" || exit 1
-        printf "\n### %s - resumed in %s\n\n" "$(date "+%Y-%m-%d %H:%M:%S")" "$2"
-        sh -c "$3"
-        printf "\n### end (exit %s) - %s\n" "$?" "$2"
+        dir="$2"; cmd="$3"
+        cd "$dir" || exit 1
+        printf "\n### %s - resumed in %s\n\n" "$(date "+%Y-%m-%d %H:%M:%S")" "$dir"
+        sh -c "$cmd"
+        status=$?
+        printf "\n### end (exit %s) - %s\n" "$status" "$dir"
+        if command -v osascript >/dev/null 2>&1; then
+            word="finished"; [ "$status" -eq 0 ] || word="FAILED (exit $status)"
+            osascript -e "display notification \"$(basename "$dir")\" with title \"continuum resume $word\"" >/dev/null 2>&1 || true
+        elif command -v notify-send >/dev/null 2>&1; then
+            notify-send "continuum resume finished (exit $status)" "$dir" || true
+        fi
     ' _ "$delay" "$DIR" "$cmd" >> "$LOG" 2>&1 &
     pid=$!
 

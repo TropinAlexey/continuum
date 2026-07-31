@@ -22,6 +22,50 @@ watch. You don't have to remember anything.
 
 That's the whole thing. A light, a question, and a nap that ends by itself.
 
+## Explain it like you're an engineer
+
+Four pieces, glued by one Claude Code mechanism, nothing else running in the background.
+
+1. **A provider script** (`providers/anthropic.sh`) shells out to `curl` against Anthropic's
+   usage endpoint — token pulled from `$CLAUDE_CODE_OAUTH_TOKEN`, the macOS Keychain, or
+   `~/.claude/.credentials.json`, whichever is found first — and prints one line per window:
+   `5h 86.5 1783000000` (name, percent used, reset as a Unix epoch). That three-column output
+   *is* the entire provider contract; swap in a script that reports a spend cap or a token
+   quota instead and continuum can't tell the difference.
+
+2. **A `Stop` hook** (`hooks/continuum-check.sh`) runs after every assistant turn. It calls the
+   provider through a 10-minute cache (positive and negative — a failed call is cached too, so
+   a rate-limited or offline endpoint doesn't get hammered every turn), compares utilization
+   against the `CONTINUUM_THRESHOLD` tiers (80/90/95/99 by default), and — the whole trick —
+   prints `{"decision":"block","reason":"..."}` to stdout. That JSON is Claude Code's own
+   mechanism for refusing to let a turn end silently; `reason` is fed back to the model as if it
+   were new input. `stop_hook_active` is checked first, so the hook can't re-trigger itself into
+   an infinite loop, and a per-session marker file means each tier warns exactly once, not on
+   every turn for the rest of the window.
+
+3. **A skill** (`skills/session-budget`) is what that injected `reason` text tells Claude to run.
+   It's pure prompt engineering: state honestly where the work stands, then use
+   `AskUserQuestion` to offer finish-now / save-and-resume / frugal-mode / ignore. It never picks
+   for you — the reason the two-axis "block, then ask" design exists at all is so a model under
+   pressure to look useful doesn't just quietly plow through the limit.
+
+4. **`continuum resume HH:MM DIR PROMPT`** is not a scheduler in the OS sense. It's
+   `nohup sh -c 'sleep "$DELAY"; cd "$DIR"; sh -c "$CMD"' &` — a detached background shell that
+   outlives the terminal closing but not a reboot. `$CMD` defaults to
+   `claude --continue -p "$PROMPT" --permission-mode acceptEdits`: `--continue` resumes the
+   *same* conversation through Claude Code's own session continuity (not a fresh context
+   rebuilt from scratch), `-p` runs it headless, and permissions are pre-granted because there
+   is nobody at the keyboard to click "allow" when it fires hours later. The log
+   (`~/.claude/continuum-resume.log`, shared across every project you've scheduled from) marks
+   `### … resumed in DIR` / `### end (exit N) - DIR` around the run and fires a desktop notification
+   (`osascript` on macOS, `notify-send` on Linux) on completion — the one part of this that
+   isn't silent by design, because nothing else is watching a background process that runs
+   unattended for hours.
+
+Nothing here touches your account, spends a request you didn't ask for, or does anything you
+can't read in a few hundred lines of POSIX `sh`. No daemon, no service that outlives the
+scheduled `sleep`, no state beyond a handful of marker files under `~/.claude/`.
+
 ## Install in one line
 
 Copy the line for your computer, paste it into your terminal, press Enter.
@@ -244,8 +288,11 @@ is documented for hooks and slash commands but not for skills, so the plugin doe
 there. Do the `PATH` symlink from the install section.
 
 **`continuum resume` never fired.** It is a detached `sleep`, so a reboot ends it. Check
-`~/.claude/continuum-resume.log`. If the reset is hours away, use a real scheduler
-(`launchd`, `systemd`, Task Scheduler).
+`~/.claude/continuum-resume.log` for `### resumed in DIR` / `### end (exit N)` markers — the log
+is shared across every project you've scheduled a resume from, so `grep` for your directory. A
+desktop notification also fires on completion (`osascript` on macOS, `notify-send` on Linux) if
+neither is available it just stays silent — the log is the source of truth either way. If the
+reset is hours away, use a real scheduler (`launchd`, `systemd`, Task Scheduler).
 
 **The warning fires but Claude ignores it.** The reason string asks Claude to run a skill; a model
 can still decide otherwise. Lower `CONTINUUM_THRESHOLD` to get the nudge earlier.
