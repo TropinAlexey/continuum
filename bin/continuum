@@ -98,8 +98,16 @@ cmd_resume() {
     printf '\n=== scheduled %s for %s in %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$T" "$DIR" >> "$LOG"
 
     # Detached: survives closing the terminal, does NOT survive a reboot.
-    nohup sh -c 'sleep "$1"; cd "$2" || exit 1; shift 2; exec sh -c "$1"' \
-        _ "$delay" "$DIR" "$cmd" >> "$LOG" 2>&1 &
+    # Header/footer are re-printed at actual run time (not just at scheduling)
+    # with DIR, so concurrent resumes across projects stay attributable in the
+    # shared log even when they finish out of order.
+    nohup sh -c '
+        sleep "$1"
+        cd "$2" || exit 1
+        printf "\n### %s - resumed in %s\n\n" "$(date "+%Y-%m-%d %H:%M:%S")" "$2"
+        sh -c "$3"
+        printf "\n### end (exit %s) - %s\n" "$?" "$2"
+    ' _ "$delay" "$DIR" "$cmd" >> "$LOG" 2>&1 &
     pid=$!
 
     printf 'Resuming in %s min (at %s) in %s: "%s"\n' "$(( delay / 60 ))" "$T" "$DIR" "$PROMPT"
