@@ -49,6 +49,7 @@ cmd_status() {
     done
     # Append to history log (best-effort, never fail)
     hist="$CNT_CFG/.continuum-history.log"
+    mkdir -p "$CNT_CFG" 2>/dev/null || true
     ts=$(date '+%Y-%m-%d %H:%M')
     summary=$(printf '%s\n' "$lines" | awk '{printf "%s:%s%% ", $1, $2}' | sed 's/ $//')
     printf '%s  %s\n' "$ts" "$summary" >> "$hist" 2>/dev/null || true

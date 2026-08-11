@@ -43,6 +43,7 @@ function Invoke-Status {
     }
     # Append to history log
     $hist = Join-Path $script:CntCfg '.continuum-history.log'
+    New-Item -ItemType Directory -Force -Path $script:CntCfg 2>$null | Out-Null
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm'
     $summary = ($allLines | ForEach-Object { $p = $_.Split(' '); "$($p[0]):$($p[1])%" }) -join ' '
     try { Add-Content -Path $hist -Value "$ts  $summary" } catch {}
