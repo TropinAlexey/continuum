@@ -2,9 +2,12 @@
 #
 #   continuum.ps1 status         utilization of every window the provider reports
 #   continuum.ps1 reset          local HH:mm when the primary window rolls over (+90s)
+#   continuum.ps1 estimate       extrapolate time remaining at current pace
 #   continuum.ps1 providers      list available providers
 #   continuum.ps1 resume HH:MM [dir] [prompt]
 #                                schedule `claude --continue` for after the reset
+#   continuum.ps1 history        show recent usage snapshots
+#   continuum.ps1 cleanup        remove stale flag/cache files (>24h old)
 
 param(
     [Parameter(Position = 0)][string]$Command = 'status',
@@ -29,7 +32,8 @@ function Format-Label {
 }
 
 function Invoke-Status {
-    foreach ($line in @(Read-CntUsage)) {
+    $allLines = @(Read-CntUsage)
+    foreach ($line in $allLines) {
         $p = $line.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
         $when = '?'
         if ($p.Count -ge 3 -and $p[2] -ne '-') {
@@ -37,6 +41,11 @@ function Invoke-Status {
         }
         '{0} {1,5}%   resets at {2}' -f (Format-Label $p[0]), $p[1], $when
     }
+    # Append to history log
+    $hist = Join-Path $script:CntCfg '.continuum-history.log'
+    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm'
+    $summary = ($allLines | ForEach-Object { $p = $_.Split(' '); "$($p[0]):$($p[1])%" }) -join ' '
+    try { Add-Content -Path $hist -Value "$ts  $summary" } catch {}
 }
 
 function Invoke-Reset {
@@ -125,11 +134,54 @@ function Invoke-Watch {
     }
 }
 
+function Invoke-Estimate {
+    $first = @(Read-CntUsage)[0].Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+    if ($first.Count -lt 3 -or $first[2] -eq '-') { throw 'no reset time available' }
+    $util = [double]::Parse($first[1], [cultureinfo]::InvariantCulture)
+    $utilI = [int][math]::Floor($util)
+    if ($utilI -le 0) { 'No usage yet.'; return }
+    $now = [datetimeoffset]::UtcNow.ToUnixTimeSeconds()
+    $reset = [int64]$first[2]
+    $remaining = $reset - $now
+    if ($remaining -le 0) { 'Window has already reset.'; return }
+    $left = [int]($remaining * (100 - $utilI) / $utilI)
+    if ($left -ge 3600) {
+        'At this pace, ~{0}h {1}m left before 100%' -f [int]($left / 3600), [int](($left % 3600) / 60)
+    } elseif ($left -ge 60) {
+        'At this pace, ~{0} min left before 100%' -f [int]($left / 60)
+    } else {
+        'At this pace, less than a minute left.'
+    }
+    $when = ConvertTo-CntHhmm $reset
+    "Currently $($first[1])% used, window resets at $when"
+}
+
+function Invoke-History {
+    $hist = Join-Path $script:CntCfg '.continuum-history.log'
+    if (-not (Test-Path $hist)) { 'No history yet. History is recorded on each status check.'; return }
+    Get-Content $hist | Select-Object -Last 20
+}
+
+function Invoke-Cleanup {
+    $cleaned = 0
+    $cutoff = (Get-Date).AddHours(-24)
+    foreach ($pattern in @('.continuum-warned-*', '.continuum-warned7d-*', '.continuum-cache-*')) {
+        Get-ChildItem -Path $script:CntCfg -Filter $pattern -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -lt $cutoff } | ForEach-Object {
+                Remove-Item $_.FullName -Force; $cleaned++
+            }
+    }
+    "Cleaned $cleaned stale files."
+}
+
 switch ($Command) {
     'status'    { Invoke-Status }
     'reset'     { Invoke-Reset }
+    'estimate'  { Invoke-Estimate }
     'providers' { Get-CntProviders }
     'watch'     { if ($Arg1) { Invoke-Watch ([int]$Arg1) } else { Invoke-Watch } }
     'resume'    { Invoke-Resume $Arg1 $Arg2 $Arg3 }
+    'history'   { Invoke-History }
+    'cleanup'   { Invoke-Cleanup }
     default     { [Console]::Error.WriteLine("continuum: unknown command '$Command'"); exit 1 }
 }

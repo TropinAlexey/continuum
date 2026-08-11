@@ -106,7 +106,7 @@ check "tier 99 warns last"     "99% tier" "$(esc 99.0)"
 
 # The "fires once per tier (...)" line reflects the configured tiers, not a hardcoded list.
 out=$(CONTINUUM_TIERS="50 75" CONTINUUM_THRESHOLD=50 CONTINUUM_MOCK="80.0" hook cti '{"session_id":"cti"}')
-check "message lists configured tiers"   "once per tier (50/75)" "$out"
+check "message lists configured tiers"   "fire once each (50/75)" "$out"
 case "$out" in *"80/90/95/99"*) bad "no hardcoded tier list" "$out" ;; *) ok "no hardcoded tier list" ;; esac
 
 # A custom floor drops the tiers beneath it.
@@ -126,6 +126,44 @@ out=$(CONTINUUM_OFF=1 hook f '{"session_id":"f"}')
 # The hook must never exit non-zero: Claude Code surfaces that to the user.
 printf '{"session_id":"g"}' | CLAUDE_CONFIG_DIR=/proc/nonexistent sh "$ROOT/hooks/continuum-check.sh" >/dev/null 2>&1 \
     && ok "exit 0 on unwritable config dir" || bad "exit 0 on unwritable config dir" "non-zero exit"
+
+echo "estimate:"
+out=$(sh "$ROOT/bin/continuum" estimate 2>&1)
+check "estimate shows time left"   "At this pace" "$out"
+check "estimate shows utilization"  "Currently"   "$out"
+
+echo "history:"
+# status writes history; we already called status above
+out=$(sh "$ROOT/bin/continuum" history 2>&1)
+check "history shows entries" "5h:" "$out"
+
+echo "cleanup:"
+# Create a stale file to clean
+touch -t 202501010000 "$CNT_CFG/.continuum-warned-stale" 2>/dev/null || true
+out=$(CLAUDE_CONFIG_DIR="$CNT_CFG" sh "$ROOT/bin/continuum" cleanup 2>&1)
+check "cleanup reports count" "Cleaned" "$out"
+
+echo "weekly tiers:"
+# Weekly window crosses its tier independently of primary (primary at 50% = below 80% floor)
+out=$(CONTINUUM_CACHE_MIN=0 CONTINUUM_MOCK="50.0 75.0" hook wk7 '{"session_id":"wk7"}')
+check "weekly tier fires"  "weekly window" "$out"
+out=$(CONTINUUM_CACHE_MIN=0 CONTINUUM_MOCK="50.0 75.0" hook wk7 '{"session_id":"wk7"}')
+[ -z "$out" ] && ok "weekly same tier quiet" || bad "weekly same tier quiet" "$out"
+out=$(CONTINUUM_CACHE_MIN=0 CONTINUUM_MOCK="50.0 90.0" hook wk7 '{"session_id":"wk7"}')
+check "weekly next tier fires" "weekly window" "$out"
+
+echo "frugal gate:"
+# The PreToolUse hook blocks Agent when CONTINUUM_FRUGAL=1
+out=$(printf '{"tool_name":"Agent"}' | CONTINUUM_FRUGAL=1 sh "$ROOT/hooks/frugal-gate.sh" 2>/dev/null)
+check "frugal blocks Agent" '"decision":"block"' "$out"
+out=$(printf '{"tool_name":"Read"}' | CONTINUUM_FRUGAL=1 sh "$ROOT/hooks/frugal-gate.sh" 2>/dev/null)
+[ -z "$out" ] && ok "frugal allows Read" || bad "frugal allows Read" "$out"
+out=$(printf '{"tool_name":"Agent"}' | sh "$ROOT/hooks/frugal-gate.sh" 2>/dev/null)
+[ -z "$out" ] && ok "no frugal allows Agent" || bad "no frugal allows Agent" "$out"
+
+echo "multi-provider:"
+out=$(CONTINUUM_PROVIDER=mock,mock sh "$ROOT/bin/continuum" status 2>&1)
+check "multi-provider status works" "5 hours" "$out"
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

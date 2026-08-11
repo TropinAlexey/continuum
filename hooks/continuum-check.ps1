@@ -61,29 +61,78 @@ $utilInt = [int][math]::Floor([double]::Parse($first[1], [cultureinfo]::Invarian
 
 $threshold = 80
 if ($env:CONTINUUM_THRESHOLD) { $threshold = [int]$env:CONTINUUM_THRESHOLD }
-if ($utilInt -lt $threshold) { exit 0 }
+
+# Escalating tiers for primary window
+$warned = 0
+if (Test-Path $flag) { $warned = [int](Get-Content $flag) }
+
+$tierList = @(80, 90, 95, 99)
+if ($env:CONTINUUM_TIERS) { $tierList = @($env:CONTINUUM_TIERS -split '\s+' | ForEach-Object { [int]$_ }) }
+$tier = 0; $tiersStr = ''
+foreach ($t in $tierList) {
+    if ($t -lt $threshold) { continue }
+    $tiersStr += $(if ($tiersStr) { "/$t" } else { "$t" })
+    if ($utilInt -ge $t -and $t -gt $tier) { $tier = $t }
+}
+
+# Weekly window tiers
+$flag7 = Join-Path $script:CntCfg ".continuum-warned7d-$sid"
+$warned7 = 0
+if (Test-Path $flag7) { $warned7 = [int](Get-Content $flag7) }
+
+$threshold7 = 70
+if ($env:CONTINUUM_THRESHOLD_7D) { $threshold7 = [int]$env:CONTINUUM_THRESHOLD_7D }
+$tierList7 = @(70, 85, 95)
+if ($env:CONTINUUM_TIERS_7D) { $tierList7 = @($env:CONTINUUM_TIERS_7D -split '\s+' | ForEach-Object { [int]$_ }) }
+$tier7 = 0; $tiers7Str = ''; $util7Int = 0
+if ($lines.Count -gt 1) {
+    $second = $lines[1].Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+    if ($second.Count -ge 2) {
+        $util7Int = [int][math]::Floor([double]::Parse($second[1], [cultureinfo]::InvariantCulture))
+        foreach ($t in $tierList7) {
+            if ($t -lt $threshold7) { continue }
+            $tiers7Str += $(if ($tiers7Str) { "/$t" } else { "$t" })
+            if ($util7Int -ge $t -and $t -gt $tier7) { $tier7 = $t }
+        }
+    }
+}
+
+$primaryNew = ($tier -gt 0 -and $tier -gt $warned)
+$weeklyNew  = ($tier7 -gt 0 -and $tier7 -gt $warned7)
+if (-not $primaryNew -and -not $weeklyNew) { exit 0 }
 
 $when = ''
 if ($first.Count -ge 3 -and $first[2] -ne '-') {
-    try { $when = ", resets at $(ConvertTo-CntHhmm ([int64]$first[2]))" } catch { $when = '' }
+    try { $when = ConvertTo-CntHhmm ([int64]$first[2]) } catch { $when = '' }
 }
 
-# Any window beyond the first, for context ("7d window 41.0%").
 $rest = ''
 if ($lines.Count -gt 1) {
     $extra = $lines[1..($lines.Count - 1)] | ForEach-Object {
         $p = $_.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
         "$($p[0]) window $($p[1])%"
     }
-    $rest = ". Also: " + ($extra -join ', ')
+    $rest = $extra -join ', '
 }
 
-Set-Content -Path $flag -Value $utilInt
+$reason = ''
+if ($primaryNew) {
+    Set-Content -Path $flag -Value $tier
+    $reason = "[continuum] The primary usage window is $utilInt% used (crossed the $tier% tier)"
+    if ($when) { $reason += ", resets at $when" }
+}
+if ($weeklyNew) {
+    Set-Content -Path $flag7 -Value $tier7
+    if ($reason) {
+        $reason += ". The weekly window also crossed the $tier7% tier ($util7Int% used)"
+    } else {
+        $reason = "[continuum] The weekly window is $util7Int% used (crossed the $tier7% tier)"
+        if ($when) { $reason += ". Primary: $utilInt%, resets at $when" }
+    }
+}
+if ($rest -and $primaryNew) { $reason += ". Also: $rest" }
+$reason += ". Do not end the turn silently: run the session-budget skill - briefly state where we stopped, then use AskUserQuestion to ask the user how to spend the rest of the window, offering the options from that skill."
+if ($primaryNew) { $reason += " Primary tiers fire once each ($tiersStr)." }
+if ($weeklyNew)  { $reason += " Weekly tiers fire once each ($tiers7Str)." }
 
-$reason = "[continuum] The primary usage window is $utilInt% used (threshold $threshold%)$when$rest. " +
-          "Do not end the turn silently: run the session-budget skill - briefly state where we stopped, " +
-          "then use AskUserQuestion to ask the user how to spend the rest of the window, offering the " +
-          "options from that skill. This warning fires once per session."
-
-# Stop hook contract: {"decision":"block","reason":"..."} feeds the reason back to Claude.
 @{ decision = 'block'; reason = $reason } | ConvertTo-Json -Compress

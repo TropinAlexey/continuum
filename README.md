@@ -1,76 +1,68 @@
 # continuum
 
-**See the limit coming. Decide what to do with what's left. Pick up where you stopped.**
+**Видишь лимит заранее. Решаешь, что делать с оставшимся. Продолжаешь с того же места.**
 
 [![ci](https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg)](https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ---
 
-## Explain it like I'm five
+## Объясни как пятилетнему
 
-Your AI helper runs on a battery. When the battery runs out, it stops in the middle of what
-it's doing — and forgets what you were both working on.
+У твоего AI-помощника есть батарейка. Когда она садится — он останавливается посреди
+работы и забывает, над чем вы работали.
 
-**continuum is a battery light.** It watches the battery, and when it's getting low it taps the
-helper on the shoulder and says: *"Almost empty. Should we finish up, or take a nap and start
-again when it's charged?"*
+**continuum — это индикатор батарейки.** Он следит за зарядом, и когда тот заканчивается,
+хлопает помощника по плечу: *«Почти пусто. Заканчиваем, или поспим и продолжим когда
+зарядится?»*
 
-If you say *"take a nap,"* continuum remembers exactly where you were, waits for the battery to
-fill back up, and quietly starts the helper again — right where you left off. You don't have to
-watch. You don't have to remember anything.
+Если выбрать *«поспать»* — continuum запомнит, где вы остановились, подождёт пока батарейка
+зарядится и тихо запустит помощника снова — с того же места. Не надо следить. Не надо
+ничего запоминать.
 
-That's the whole thing. A light, a question, and a nap that ends by itself.
+Вот и всё. Индикатор, вопрос и сон, который заканчивается сам.
 
-## Explain it like you're an engineer
+## Объясни как инженеру
 
-Four pieces, glued by one Claude Code mechanism, nothing else running in the background.
+Четыре детали, склеенные одним механизмом Claude Code. Ничего не крутится в фоне.
 
-1. **A provider script** (`providers/anthropic.sh`) shells out to `curl` against Anthropic's
-   usage endpoint — token pulled from `$CLAUDE_CODE_OAUTH_TOKEN`, the macOS Keychain, or
-   `~/.claude/.credentials.json`, whichever is found first — and prints one line per window:
-   `5h 86.5 1783000000` (name, percent used, reset as a Unix epoch). That three-column output
-   *is* the entire provider contract; swap in a script that reports a spend cap or a token
-   quota instead and continuum can't tell the difference.
+1. **Скрипт-провайдер** (`providers/anthropic.sh`) делает `curl` к эндпоинту использования
+   Anthropic — токен из `$CLAUDE_CODE_OAUTH_TOKEN`, macOS Keychain, или
+   `~/.claude/.credentials.json` — и печатает строку на каждое окно:
+   `5h 86.5 1783000000` (имя, процент, reset как Unix epoch). Эти три колонки — весь контракт
+   провайдера. Подставь скрипт, который отдаёт расход по API или токенный лимит —
+   continuum не заметит разницы.
 
-2. **A `Stop` hook** (`hooks/continuum-check.sh`) runs after every assistant turn. It calls the
-   provider through a 10-minute cache (positive and negative — a failed call is cached too, so
-   a rate-limited or offline endpoint doesn't get hammered every turn), compares utilization
-   against the `CONTINUUM_THRESHOLD` tiers (80/90/95/99 by default), and — the whole trick —
-   prints `{"decision":"block","reason":"..."}` to stdout. That JSON is Claude Code's own
-   mechanism for refusing to let a turn end silently; `reason` is fed back to the model as if it
-   were new input. `stop_hook_active` is checked first, so the hook can't re-trigger itself into
-   an infinite loop, and a per-session marker file means each tier warns exactly once, not on
-   every turn for the rest of the window.
+2. **`Stop`-хук** (`hooks/continuum-check.sh`) запускается после каждого хода. Вызывает
+   провайдера через 10-минутный кэш (позитивный и негативный — неудачный вызов тоже
+   кэшируется, чтобы не долбить лимитированный эндпоинт каждый ход), сравнивает утилизацию
+   с тирами `CONTINUUM_TIERS` (80/90/95/99 по умолчанию) и — вот весь трюк — печатает
+   `{"decision":"block","reason":"..."}` на stdout. Это механизм Claude Code для запрета
+   молчаливого завершения хода; `reason` подаётся модели как новый ввод. `stop_hook_active`
+   проверяется первым (иначе бесконечный цикл), а файл-флаг по сессии означает что каждый
+   тир срабатывает ровно один раз.
 
-3. **A skill** (`skills/session-budget`) is what that injected `reason` text tells Claude to run.
-   It's pure prompt engineering: state honestly where the work stands, then use
-   `AskUserQuestion` to offer finish-now / save-and-resume / frugal-mode / ignore. It never picks
-   for you — the reason the two-axis "block, then ask" design exists at all is so a model under
-   pressure to look useful doesn't just quietly plow through the limit.
+3. **`PreToolUse`-хук** (`hooks/frugal-gate.sh`) — в экономном режиме (`CONTINUUM_FRUGAL=1`)
+   блокирует вызовы `Agent`. Не просьба — запрет на уровне хука.
 
-4. **`continuum resume HH:MM DIR PROMPT`** is not a scheduler in the OS sense. It's
-   `nohup sh -c 'sleep "$DELAY"; cd "$DIR"; sh -c "$CMD"' &` — a detached background shell that
-   outlives the terminal closing but not a reboot. `$CMD` defaults to
-   `claude --continue -p "$PROMPT" --permission-mode acceptEdits`: `--continue` resumes the
-   *same* conversation through Claude Code's own session continuity (not a fresh context
-   rebuilt from scratch), `-p` runs it headless, and permissions are pre-granted because there
-   is nobody at the keyboard to click "allow" when it fires hours later. The log
-   (`~/.claude/continuum-resume.log`, shared across every project you've scheduled from) marks
-   `### … resumed in DIR` / `### end (exit N) - DIR` around the run and fires a desktop notification
-   (`osascript` on macOS, `notify-send` on Linux) on completion — the one part of this that
-   isn't silent by design, because nothing else is watching a background process that runs
-   unattended for hours.
+4. **Скилл** (`skills/session-budget`) — то, что injected `reason` просит Claude запустить.
+   Чистый prompt engineering: честно описать ситуацию, потом `AskUserQuestion` с вариантами.
+   Никогда не решает за тебя.
 
-Nothing here touches your account, spends a request you didn't ask for, or does anything you
-can't read in a few hundred lines of POSIX `sh`. No daemon, no service that outlives the
-scheduled `sleep`, no state beyond a handful of marker files under `~/.claude/`.
+5. **`continuum resume`** — планирует `claude --continue -p "$PROMPT"` на после сброса.
+   По умолчанию через `launchd` (macOS) или `systemd-run` (Linux) — переживает ребут.
+   Если ни один не доступен — `nohup sleep` (переживает закрытие терминала, не ребут).
+   Лог (`~/.claude/continuum-resume.log`) помечает `### resumed in DIR` / `### end (exit N)`
+   вокруг запуска. По завершению — десктопное уведомление.
 
-## Install in one line
+Ничего не трогает аккаунт, не тратит запрос без спроса, ничего нельзя не прочитать
+в нескольких сотнях строк POSIX `sh`.
 
-Copy the line for your computer, paste it into your terminal, press Enter.
+## Установка в одну строку
 
-**Mac or Linux**
+Скопируй строку для своей ОС, вставь в терминал, нажми Enter.
+
+**Mac или Linux**
 ```sh
 curl -fsSL https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.sh | sh
 ```
@@ -80,155 +72,162 @@ curl -fsSL https://raw.githubusercontent.com/TropinAlexey/continuum/main/install
 irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | iex
 ```
 
-Then type `continuum status` to see how much battery is left.
+Затем набери `continuum status` чтобы увидеть сколько батарейки осталось.
 
-> **A fair warning, in plain words:** that command downloads a script from the internet and runs
-> it. That is convenient but you are trusting it. If you'd rather look first — good instinct —
-> open the [install.sh](install.sh) / [install.ps1](install.ps1) file, read it (it's short), and
-> run it yourself. It only copies files into a folder and adds one command to your PATH.
+> **Честное предупреждение:** эта команда скачивает скрипт из интернета и запускает.
+> Если хочешь сначала посмотреть — правильный инстинкт — открой
+> [install.sh](install.sh) / [install.ps1](install.ps1), прочитай (он короткий)
+> и запусти руками.
 
 ---
 
-It always happens at the worst moment.
+## Что делает continuum
 
-You are four files into a refactor. The tests are almost green. You and Claude have built up an
-hour of shared context — which functions are landmines, what the last migration broke, why that
-one `if` has to stay. Then the turn ends and there it is:
+Даёт то, чего на экране лимита никогда не было: **предупреждение и выбор.**
 
-> `5-hour limit reached · resets at 21:40`
-
-The context is gone. The plan lived in the conversation and the conversation is over. Tomorrow
-morning you will spend your first twenty minutes reconstructing what you already knew.
-
-The limit was never the problem. **Walking into it blind was.**
-
-## What continuum does
-
-It gives you the one thing that limit screen never does: *warning, and a choice.*
-
-When your usage window fills up, Claude doesn't quietly finish its turn and leave you to find
-out the hard way. It stops, tells you exactly where the work stands, and asks:
+Когда окно использования заполняется, Claude не молча завершает ход и оставляет тебя
+гадать. Он останавливается, говорит где мы и спрашивает:
 
 ```
-The window is 86% used, resets at 21:40. What do we do?
+Окно заполнено на 86%, сбрасывается в 21:40. Что делаем?
 
-  > Finish and wrap up          bring it to a working state, run the tests, show the diff
-    Finish the task set, stop   complete the planned batch, then stop — no new scope
-    Save state and resume       commit, then schedule the session to continue itself at 21:40
-    Frugal mode                 no subagents, no big files, short answers
-    Cheap tasks only            docs and commit messages, postpone the heavy analysis
-    Carry on                    ignore this, I know what I'm doing
+  > Закончить и свернуться       довести до рабочего состояния, прогнать тесты, показать diff
+    Доделать текущий набор задач  завершить запланированный пакет, потом стоп — ничего нового
+    Сохранить и продолжить        коммит, потом авто-resume после сброса
+    Экономный режим               без субагентов, без больших файлов, короткие ответы
+    Только дешёвые задачи         доки и коммит-сообщения, тяжёлый анализ отложить
+    Продолжать как есть           проигнорировать предупреждение
 ```
 
-It asks in whatever language you've been working in. And it doesn't nag: the warning steps
-up through **80% → 90% → 95% → 99%**, firing once at each tier as the window fills — never
-twice for the same tier, never on every turn.
+Спрашивает на языке, на котором вы работаете. И не достаёт: предупреждение ступенчатое —
+**80% → 90% → 95% → 99%**, срабатывает один раз на каждом уровне. Недельное окно отслеживается
+отдельно — **70% → 85% → 95%**.
 
-Pick *"save state and resume"* and it commits your work, schedules `claude --continue` for
-21:41 with a description of the task you were on, and hands you the PID. You close the laptop.
+Выбрал *«сохранить и продолжить»* — commitит работу, планирует `claude --continue` на 21:41,
+отдаёт PID. Закрываешь ноутбук. В 21:41, без тебя, сессия продолжает с того же места.
+По завершению — десктопное уведомление.
 
-At 21:41, without you, the session picks the thread back up.
+### Экономный режим
 
-Three moving parts, and you can read all of them in an afternoon:
+Выбрал *«Экономный режим»* — устанавливается `CONTINUUM_FRUGAL=1`, и PreToolUse-хук
+**принудительно блокирует** вызовы субагентов (`Agent`). Это не просьба — это запрет на
+уровне хука.
 
-| | |
-|---|---|
-| **A hook** | Fires when Claude ends a turn. Once per tier (80/90/95/99), it refuses to let the turn end silently. |
-| **A skill** | Teaches Claude what to do with that moment: summarize honestly, then ask you — never decide for you. |
-| **A scheduler** | Sleeps until the reset, then resumes the session where it stopped. |
+## Два способа установки
 
-No daemon. No telemetry. No account. Nothing runs that you did not start.
+**Однострочник** даёт команду `continuum` в любом терминале. Работает с любым AI-агентом.
 
-## Two ways to install, pick one
-
-**The one-liner above** gives you the `continuum` command in any terminal. It works with any AI
-agent, and it's all you need for `continuum status`, `continuum watch`, and `continuum resume`.
-
-**The Claude Code plugin** additionally gives you the *automatic* tap-on-the-shoulder — the part
-where Claude stops by itself at the threshold and asks you what to do. Run this inside Claude
-Code:
+**Плагин Claude Code** добавляет *автоматическое* предупреждение — часть где Claude сам
+останавливается на пороге и спрашивает что делать:
 
 ```
 /plugin marketplace add TropinAlexey/continuum
 /plugin install continuum
 ```
 
-Want both? Do both — the one-liner for the command, the plugin for the automatic warning. They
-don't conflict.
+Хочешь оба? Ставь оба — однострочник для команды, плагин для автоматики. Не конфликтуют.
 
-## Use
+## Использование
 
 ```sh
 continuum status      # 5 hours   86.5%   resets at 21:40
                       # 7 days    41.0%   resets at 02:00
-continuum reset       # 21:41   (reset +90s, ready to schedule against)
-continuum providers   # anthropic, mock
-continuum watch       # poll in a spare pane; ring the bell at the threshold
+continuum reset       # 21:41   (reset +90s, готово для планирования)
+continuum estimate    # At this pace, ~2h 15m left before 100%
+continuum providers   # anthropic, mock, spend
+continuum watch       # поллинг в отдельной панели; звонок на пороге
+continuum history     # последние 20 снапшотов использования
+continuum cleanup     # удалить устаревшие файлы флагов/кэша (>24ч)
 
-continuum resume "$(continuum reset)" "$PWD" "finish the DocumentService tests"
+continuum resume "$(continuum reset)" "$PWD" "доделать тесты DocumentService"
 ```
 
-Not using Claude Code? `continuum watch` needs no hooks and no plugin — it works in any
-terminal, and `continuum resume` drives whatever agent you point it at:
+Не используешь Claude Code? `continuum watch` не требует хуков и плагина — работает в любом
+терминале. `continuum resume` запускает любого агента:
 
 ```sh
 CONTINUUM_RESUME_CMD='codex exec "{prompt}"'    continuum resume 21:41 "$PWD" "finish the tests"
 CONTINUUM_RESUME_CMD='opencode run "{prompt}"'  continuum resume 21:41 "$PWD" "finish the tests"
 ```
 
-See **[docs/harnesses.md](docs/harnesses.md)** for what is verified and what is merely likely —
-we keep that line sharp.
+См. **[docs/harnesses.md](docs/harnesses.md)** — что проверено, что вероятно.
 
-## Read this before installing
+## Прочитай перед установкой
 
-**It uses an undocumented endpoint with your OAuth token.**
-`https://api.anthropic.com/api/oauth/usage` is what `/usage` calls. It is not a public API and
-can change without notice. To read it, the `anthropic` provider looks for your token in
-`$CLAUDE_CODE_OAUTH_TOKEN`, then the macOS Keychain, then `~/.claude/.credentials.json` — the
-same places Claude Code keeps it. The token goes into one `curl` header, to one host, and
-nowhere else. It is a few hundred lines of shell. Read them before you trust them.
+**Используется недокументированный эндпоинт с OAuth-токеном.**
+`https://api.anthropic.com/api/oauth/usage` — то что вызывает `/usage`. Это не публичный API
+и может измениться без предупреждения. Провайдер `anthropic` ищет токен в
+`$CLAUDE_CODE_OAUTH_TOKEN`, потом в macOS Keychain, потом в `~/.claude/.credentials.json`.
+Токен уходит в один заголовок `curl`, на один хост. Несколько сотен строк шелла — читай
+перед тем как доверять.
 
-**`continuum resume` runs Claude unattended, with `--permission-mode acceptEdits`.**
-It sleeps until the reset, then runs `claude --continue -p "<your prompt>"` in your project.
-It edits code with nobody watching. Keep the prompt narrow. Do not point it at anything you
-would not let a stranger merge.
+**`continuum resume` запускает Claude без присмотра, с `--permission-mode acceptEdits`.**
+Спит до сброса, потом запускает `claude --continue -p "<prompt>"` в проекте. Правит код
+без наблюдателя. Делай промпт узким. Не направляй на то, что не дал бы мержить незнакомцу.
 
-## Any model, any budget
+## Resume переживает перезагрузку
 
-continuum does not know what Anthropic is. It asks a **provider** for two numbers — how much is
-used, when it resets — and everything else is provider-agnostic. A provider is a script that
-prints:
+`continuum resume` автоматически выбирает лучший планировщик ОС:
+
+| ОС | Планировщик | Переживает ребут |
+|---|---|---|
+| macOS | `launchd` (one-shot plist) | да |
+| Linux | `systemd-run --user` (transient timer) | да |
+| Fallback | `nohup sleep` | нет |
+
+По завершению resume — **десктопное уведомление** (`osascript` на Mac, `notify-send` на Linux).
+Лог (`~/.claude/continuum-resume.log`) помечает `### resumed in DIR` / `### end (exit N)` —
+общий для всех проектов, `grep` по директории чтобы найти свой.
+
+## Провайдеры
+
+continuum не знает что такое Anthropic. Он спрашивает **провайдера** — «сколько использовано,
+когда сброс» — и всё остальное провайдер-агностично.
+
+### Встроенные провайдеры
+
+| Провайдер | Что измеряет | Нужно |
+|---|---|---|
+| `anthropic` | Подписочные окна (5ч/7д) | OAuth-токен Claude Code |
+| `spend` | Месячный расход по API-ключу | `ANTHROPIC_ADMIN_KEY`, `CONTINUUM_SPEND_CAP` ($ бюджет, по умолчанию 100) |
+| `mock` | Фейковые числа для тестов | ничего |
+
+### Свой провайдер
+
+Провайдер — скрипт, который печатает:
 
 ```
 5h 86.5 1783000000
 7d 41.0 1783300000
 ```
 
-That is the entire interface. `providers/anthropic.sh` is 60 lines. Writing one for your own
-budget — a spend cap, a token quota, your team's shared limit — takes about ten minutes:
-**[docs/writing-a-provider.md](docs/writing-a-provider.md)**. Drop it in `~/.claude/providers/`
-and select it with `CONTINUUM_PROVIDER=yours`. No PR needed, though PRs are welcome.
+Вот и весь интерфейс. Написать свой — 10 минут:
+**[docs/writing-a-provider.md](docs/writing-a-provider.md)**. Положи в `~/.claude/providers/`
+и выбери через `CONTINUUM_PROVIDER=yours`.
 
-There is no OpenAI or Gemini provider yet, and that is an honest gap rather than an oversight:
-neither exposes a rolling subscription window like Anthropic's, so a provider for them would
-measure something different — spend, or tokens, or requests per minute. Define the window,
-document what the number means, send it in.
+### Несколько провайдеров одновременно
 
-## Every operating system
+```sh
+CONTINUUM_PROVIDER=anthropic,spend continuum status
+```
 
-| | Shell | Status |
+Запускает оба, берёт самую высокую утилизацию как основную линию. Ловит ситуацию «5-часовое
+окно в порядке, но $40 за сегодня сожжено».
+
+## Все ОС
+
+| | Shell | Статус |
 |---|---|---|
-| macOS | `sh` | works as shipped |
-| Linux | `sh` | works as shipped |
-| Windows + Git Bash | `sh` | works as shipped — this is Claude Code's default on Windows |
-| Windows, no Git Bash | PowerShell | ships as `.ps1`, wire it up below |
+| macOS | `sh` | работает из коробки |
+| Linux | `sh` | работает из коробки |
+| Windows + Git Bash | `sh` | работает из коробки |
+| Windows без Git Bash | PowerShell | `.ps1`, подключить ниже |
 
-Claude Code runs hooks under Git Bash on Windows, falling back to PowerShell when Git Bash is
-absent. So there are two implementations, `.sh` and `.ps1`, tested by the same suite on all
-three operating systems in CI. No python, no node, no `jq` — POSIX `sh` + `curl`, or PowerShell
-5.1+.
+Claude Code запускает хуки через Git Bash на Windows, откатывается на PowerShell если
+Git Bash нет. Две реализации, `.sh` и `.ps1`, проверяются одним тест-набором на всех ОС
+в CI. Без python, без node, без `jq` — POSIX `sh` + `curl`, или PowerShell 5.1+.
 
-Without Git Bash, override the hook in your `settings.json`:
+Без Git Bash — переопредели хуки в `settings.json`:
 
 ```json
 {
@@ -237,93 +236,96 @@ Without Git Bash, override the hook in your `settings.json`:
       "type": "command",
       "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/hooks/continuum-check.ps1\"",
       "shell": "powershell"
+    }]}],
+    "PreToolUse": [{ "hooks": [{
+      "type": "command",
+      "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/hooks/frugal-gate.ps1\"",
+      "shell": "powershell"
     }]}]
   }
 }
 ```
 
-## Configuration
+## Настройка
 
-| Variable | Default | Meaning |
+| Переменная | По умолчанию | Что делает |
 |---|---|---|
-| `CONTINUUM_THRESHOLD` | `80` | Floor percent of the primary window. Tiers below it are dropped. |
-| `CONTINUUM_TIERS` | `80 90 95 99` | Warning tiers. Each fires once, as the window climbs into it. |
-| `CONTINUUM_PROVIDER` | `anthropic` | Which provider to ask. |
-| `CONTINUUM_RESUME_CMD` | `claude --continue -p "{prompt}" …` | Which agent `resume` wakes up. `{prompt}` is the task. |
-| `CONTINUUM_DRY_RUN` | unset | `resume` prints the command instead of scheduling it. |
-| `CONTINUUM_OFF` | unset | Set to anything to disable the hook. |
-| `CONTINUUM_CACHE_MIN` | `10` | Minutes to cache a provider response. `0` disables the cache. |
+| `CONTINUUM_THRESHOLD` | `80` | Порог основного окна (%). Тиры ниже него игнорируются. |
+| `CONTINUUM_TIERS` | `80 90 95 99` | Уровни основного окна. Каждый срабатывает один раз. |
+| `CONTINUUM_THRESHOLD_7D` | `70` | Порог недельного окна (%). |
+| `CONTINUUM_TIERS_7D` | `70 85 95` | Уровни недельного окна. |
+| `CONTINUUM_PROVIDER` | `anthropic` | Какого провайдера спрашивать. Через запятую — несколько. |
+| `CONTINUUM_RESUME_CMD` | `claude --continue -p "{prompt}" …` | Какого агента будит `resume`. `{prompt}` — задача. |
+| `CONTINUUM_DRY_RUN` | не задан | `resume` печатает команду вместо планирования. |
+| `CONTINUUM_OFF` | не задан | Отключить Stop-хук. |
+| `CONTINUUM_FRUGAL` | не задан | `1` — экономный режим: PreToolUse-хук блокирует Agent. |
+| `CONTINUUM_CACHE_MIN` | `10` | Минуты кэширования ответа провайдера. `0` отключает кэш. |
+| `CONTINUUM_SPEND_CAP` | `100` | Месячный бюджет в $ для провайдера `spend`. |
+| `ANTHROPIC_ADMIN_KEY` | — | Admin API ключ для провайдера `spend`. |
 
-## How it works
+## Как работает
 
-Claude Code fires the `Stop` hook every time Claude finishes a turn. A `Stop` hook that prints
-`{"decision":"block","reason":"..."}` sends `reason` back to Claude instead of letting the turn
-end. That is the whole trick. Our reason carries the numbers and tells Claude to run the
-`session-budget` skill and ask you a question.
+Claude Code вызывает `Stop`-хук каждый раз когда Claude завершает ход. Хук, который печатает
+`{"decision":"block","reason":"..."}` отправляет `reason` обратно Claude вместо того чтобы дать
+ходу закончиться. Вот и весь трюк. Наш reason несёт числа и говорит Claude запустить скилл
+`session-budget`.
 
-Everything else is damage control around that one idea:
+Всё остальное — защита от граничных случаев вокруг этой идеи:
 
-- **The endpoint rate-limits hard**, and the hook runs after *every* turn. Responses are cached
-  for 10 minutes, and a failure writes a marker that suppresses retries for another 10 — a
-  negative cache. Without it you get throttled fast.
-- **`stop_hook_active` is checked first.** Claude Code sets it when re-running the hook while
-  already handling a block. Ignore it and you get an infinite loop.
-- **A per-session flag** means you are warned once, not after every turn for the rest of the window.
-- **Every failure path exits 0 and silent.** A `Stop` hook that errors, or chatters when it has
-  nothing to say, is worse than no hook at all.
+- **Эндпоинт жёстко лимитирован**, а хук запускается после *каждого* хода. Ответы кэшируются
+  на 10 минут, ошибка ставит маркер на ещё 10 — негативный кэш.
+- **`stop_hook_active` проверяется первым.** Claude Code ставит его при повторном запуске хука.
+  Без этой проверки — бесконечный цикл.
+- **Флаг по сессии** — каждый уровень срабатывает один раз, не после каждого хода.
+- **Каждый путь ошибки выходит с 0 и молча.** Stop-хук который ошибается или болтает без
+  повода — хуже чем никакого хука.
 
 ## Troubleshooting
 
-**Nothing happens at 80%.** The hook only fires on `Stop`, when Claude finishes a turn. Test it
-in isolation: `sh tests/run.sh`. If that passes, the plugin is probably not loaded — check `/plugin`.
+**Ничего не происходит на 80%.** Хук срабатывает только на `Stop`. Проверь: `sh tests/run.sh`.
+Если проходит — плагин не загружен, проверь `/plugin`.
 
-**`usage endpoint unavailable`.** You are offline, rate-limited (wait 10 minutes — the negative
-cache is doing its job), or your token expired. Re-login to Claude Code.
+**`usage endpoint unavailable`.** Оффлайн, рейт-лимит (подожди 10 минут — негативный кэш
+работает), или токен истёк. Перелогинься в Claude Code.
 
-**`no OAuth token found`.** Not logged in, or your credentials live somewhere the lookup does not
-check. Export `CLAUDE_CODE_OAUTH_TOKEN` to skip the search entirely.
+**`no OAuth token found`.** Не залогинен, или credentials лежат не там. Экспортируй
+`CLAUDE_CODE_OAUTH_TOKEN`.
 
-**The skills cannot find `continuum`.** They call it as a bare command. `${CLAUDE_PLUGIN_ROOT}`
-is documented for hooks and slash commands but not for skills, so the plugin does not rely on it
-there. Do the `PATH` symlink from the install section.
+**`continuum resume` не сработал.** Проверь `~/.claude/continuum-resume.log` — ищи маркеры
+`### resumed in DIR` / `### end (exit N)`. Лог общий для всех проектов, `grep` по директории.
+На macOS — `launchctl list | grep continuum`. На Linux —
+`systemctl --user list-timers | grep continuum`. Десктопное уведомление тоже срабатывает
+по завершению; если ни `osascript` ни `notify-send` не доступны — только лог.
 
-**`continuum resume` never fired.** It is a detached `sleep`, so a reboot ends it. Check
-`~/.claude/continuum-resume.log` for `### resumed in DIR` / `### end (exit N)` markers — the log
-is shared across every project you've scheduled a resume from, so `grep` for your directory. A
-desktop notification also fires on completion (`osascript` on macOS, `notify-send` on Linux) if
-neither is available it just stays silent — the log is the source of truth either way. If the
-reset is hours away, use a real scheduler (`launchd`, `systemd`, Task Scheduler).
+**Предупреждение есть, Claude игнорирует.** Reason просит Claude запустить скилл; модель
+может решить иначе. Понизь `CONTINUUM_THRESHOLD`.
 
-**The warning fires but Claude ignores it.** The reason string asks Claude to run a skill; a model
-can still decide otherwise. Lower `CONTINUUM_THRESHOLD` to get the nudge earlier.
-
-## Contributing
+## Участие
 
 ```
-sh tests/run.sh          # 24 tests, mock provider, no network
-pwsh tests/run.ps1       # the same suite against the PowerShell implementation
+sh tests/run.sh          # 48 тестов, mock-провайдер, без сети
+pwsh tests/run.ps1       # тот же набор для PowerShell
 ```
 
-CI runs both on Linux, macOS, and Windows. Things that would genuinely help:
+CI запускает оба на Linux, macOS и Windows. Что реально помогло бы:
 
-- A provider for another budget: OpenAI spend, Gemini quota, your team's shared cap.
-  See **[docs/writing-a-provider.md](docs/writing-a-provider.md)** — it takes about ten minutes.
-- Confirmation of whether Codex CLI honours a blocking `Stop` hook. We do not know yet, and
-  [docs/harnesses.md](docs/harnesses.md) says so.
-- A `launchd`/`systemd`/Task Scheduler backend for `continuum resume`, so scheduled resumes
-  survive reboots.
-- Acting on the weekly window, not just reporting it.
+- Провайдер для другого бюджета: OpenAI spend, Gemini quota.
+  См. **[docs/writing-a-provider.md](docs/writing-a-provider.md)**.
+- Подтверждение, работает ли блокирующий `Stop`-хук в Codex CLI.
+  [docs/harnesses.md](docs/harnesses.md) честно говорит что не знаем.
 
-Keep it dependency-free. Keep every failure path silent.
+Без зависимостей. Каждый путь ошибки — молча.
 
-## Uninstall
+## Удаление
 
 ```
 /plugin uninstall continuum
 rm -f /usr/local/bin/continuum
-rm -f ~/.claude/.continuum-cache-* ~/.claude/.continuum-warned-*
+rm -f ~/.claude/.continuum-cache-* ~/.claude/.continuum-warned-* ~/.claude/.continuum-warned7d-* ~/.claude/.continuum-history.log
 ```
 
-## License
+Или: `continuum cleanup` удалит только устаревшие файлы (>24ч).
+
+## Лицензия
 
 MIT

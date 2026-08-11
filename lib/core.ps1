@@ -38,17 +38,40 @@ function Get-CntProviderPath {
     return $null
 }
 
-# Returns the provider's lines as a string array. Throws on failure.
-function Read-CntUsage {
-    $p = Get-CntProviderPath $script:CntProvider
+# Read a single provider's output as a string array. Throws on failure.
+function Read-CntUsageSingle {
+    param([string]$Name)
+    $p = Get-CntProviderPath $Name
     if (-not $p) {
-        throw "unknown provider '$($script:CntProvider)' (have: $((Get-CntProviders) -join ' '))"
+        throw "unknown provider '$Name' (have: $((Get-CntProviders) -join ' '))"
     }
-    $global:LASTEXITCODE = 0        # StrictMode: never read it before it exists
+    $global:LASTEXITCODE = 0
     $lines = & $p
-    if ($LASTEXITCODE -ne 0) { throw "provider '$($script:CntProvider)' failed" }
-    if (-not $lines) { throw "provider '$($script:CntProvider)' returned nothing" }
+    if ($LASTEXITCODE -ne 0) { throw "provider '$Name' failed" }
+    if (-not $lines) { throw "provider '$Name' returned nothing" }
     return @($lines | Where-Object { $_ -and $_.Trim() })
+}
+
+# Returns the provider's lines as a string array.
+# Supports comma-separated providers: runs all, keeps highest-utilization primary line.
+function Read-CntUsage {
+    if ($script:CntProvider -notmatch ',') {
+        return Read-CntUsageSingle $script:CntProvider
+    }
+    $provs = $script:CntProvider -split ','
+    $bestUtil = 0; $bestLine = ''; $rest = @()
+    foreach ($prov in $provs) {
+        try {
+            $lines = @(Read-CntUsageSingle $prov.Trim())
+        } catch { continue }
+        $f = $lines[0].Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+        $u = [int][math]::Floor([double]::Parse($f[1], [cultureinfo]::InvariantCulture))
+        if ($u -gt $bestUtil) { $bestUtil = $u; $bestLine = $lines[0] }
+        if ($lines.Count -gt 1) { $rest += $lines[1..($lines.Count - 1)] }
+    }
+    if (-not $bestLine) { throw 'all providers failed' }
+    $result = @($bestLine) + $rest
+    return $result
 }
 
 # "2026-07-09T17:40:00.180+00:00" -> unix epoch seconds
@@ -82,6 +105,20 @@ function Get-CntHhmmDelay {
 # There is no Keychain here; Claude Code stores JSON under the config dir.
 #
 # WARNING: returns your OAuth access token. Never write it to a log or transcript.
+# Desktop notification, best-effort
+function Send-CntNotification {
+    param([string]$Title, [string]$Message)
+    try {
+        [void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
+        $n = New-Object System.Windows.Forms.NotifyIcon
+        $n.Icon = [System.Drawing.SystemIcons]::Information
+        $n.BalloonTipTitle = $Title
+        $n.BalloonTipText = $Message
+        $n.Visible = $true
+        $n.ShowBalloonTip(5000)
+    } catch {}
+}
+
 function Get-CntToken {
     if ($env:CLAUDE_CODE_OAUTH_TOKEN) { return $env:CLAUDE_CODE_OAUTH_TOKEN }
     $f = Join-Path $script:CntCfg '.credentials.json'

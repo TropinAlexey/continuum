@@ -38,7 +38,7 @@ Offer 3-4 options that fit the moment, recommended one first:
 | **Finish and wrap up** | Bring the current task to a working state, run the tests, show the diff. No new work. |
 | **Finish the task set, then stop** | Complete the remaining planned tasks (the current TODO batch), then stop — no new scope. Offer this only when what's left is a bounded, known set that plausibly fits the remaining window; skip it if the work is open-ended. |
 | **Save state and schedule a resume** | Commit or stash, then `continuum resume "$(continuum reset)" "$PWD" "<specific task>"` so the session continues itself after the reset. |
-| **Frugal mode** | Keep going, but: no subagents, no large files into context, short answers. Suggest `/compact`. |
+| **Frugal mode** | Keep going, but: no subagents, no large files into context, short answers. Run `export CONTINUUM_FRUGAL=1` to enforce via hook, suggest `/compact`. |
 | **Cheap tasks only** | Spend the rest on docs, commit messages, README; postpone heavy code analysis. |
 | **Switch model** | Move to a cheaper model (`/model`) for routine work. |
 | **Carry on as usual** | Ignore the warning; if the limit hits, the user runs `continuum resume` themselves. |

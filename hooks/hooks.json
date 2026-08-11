@@ -10,6 +10,17 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/frugal-gate.sh\"",
+            "shell": "bash"
+          }
+        ]
+      }
     ]
   }
 }

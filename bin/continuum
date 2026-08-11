@@ -3,10 +3,13 @@
 #
 #   continuum status            utilization of every window the provider reports
 #   continuum reset             local HH:MM when the primary window rolls over (+90s)
+#   continuum estimate          extrapolate time remaining at current pace
 #   continuum providers         list available providers
 #   continuum watch [seconds]   poll until the threshold is crossed, then say so
 #   continuum resume HH:MM [dir] [prompt]
 #                               schedule the agent to pick up after the reset
+#   continuum history           show recent usage snapshots
+#   continuum cleanup           remove stale flag/cache files (>24h old)
 #
 #   CONTINUUM_PROVIDER=mock continuum status     pick a provider (default: anthropic)
 #   CONTINUUM_RESUME_CMD='codex exec "{prompt}"' pick an agent (default: claude)
@@ -44,6 +47,11 @@ cmd_status() {
         [ "$reset" != "-" ] && when=$(cnt_epoch_hhmm "$reset" 2>/dev/null || echo "?")
         printf '%s %5s%%   resets at %s\n' "$(label "$window")" "$util" "$when"
     done
+    # Append to history log (best-effort, never fail)
+    hist="$CNT_CFG/.continuum-history.log"
+    ts=$(date '+%Y-%m-%d %H:%M')
+    summary=$(printf '%s\n' "$lines" | awk '{printf "%s:%s%% ", $1, $2}' | sed 's/ $//')
+    printf '%s  %s\n' "$ts" "$summary" >> "$hist" 2>/dev/null || true
 }
 
 cmd_reset() {
@@ -97,14 +105,10 @@ cmd_resume() {
     mkdir -p "$CNT_CFG" 2>/dev/null || true
     printf '\n=== scheduled %s for %s in %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$T" "$DIR" >> "$LOG"
 
-    # Detached: survives closing the terminal, does NOT survive a reboot.
-    # Header/footer are re-printed at actual run time (not just at scheduling) with DIR, so
-    # concurrent resumes across projects stay attributable in the shared log even when they
-    # finish out of order. Not `exec` for the final command - we need control back afterward
-    # to print the footer and fire a desktop notification, since nothing else is watching a
-    # process that runs unattended for hours.
-    nohup sh -c '
-        sleep "$1"
+    # The wrapper that runs after the delay: header/footer in the log so concurrent
+    # resumes across projects stay attributable, plus a desktop notification with exit
+    # status since nothing else is watching a process that runs unattended for hours.
+    run_wrapper='
         dir="$2"; cmd="$3"
         cd "$dir" || exit 1
         printf "\n### %s - resumed in %s\n\n" "$(date "+%Y-%m-%d %H:%M:%S")" "$dir"
@@ -117,11 +121,70 @@ cmd_resume() {
         elif command -v notify-send >/dev/null 2>&1; then
             notify-send "continuum resume finished (exit $status)" "$dir" || true
         fi
-    ' _ "$delay" "$DIR" "$cmd" >> "$LOG" 2>&1 &
-    pid=$!
+    '
 
-    printf 'Resuming in %s min (at %s) in %s: "%s"\n' "$(( delay / 60 ))" "$T" "$DIR" "$PROMPT"
-    printf 'Scheduled, PID %s. Cancel: kill %s   Log: %s\n' "$pid" "$pid" "$LOG"
+    # Try OS scheduler (survives reboots), fall back to nohup (does not).
+    scheduled=false
+
+    if [ "$(uname)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
+        label="com.continuum.resume.$(date +%s)"
+        plist="$HOME/Library/LaunchAgents/${label}.plist"
+        mkdir -p "$HOME/Library/LaunchAgents" 2>/dev/null || true
+        fire_epoch=$(( $(date +%s) + delay ))
+        fire_date=$(date -r "$fire_epoch" +"%Y-%m-%dT%H:%M:%S" 2>/dev/null) || fire_date=""
+        if [ -n "$fire_date" ]; then
+            # The plist runs a shell snippet that does: cd DIR && cmd >> LOG; notify; self-clean.
+            escaped_cmd=$(printf '%s' "$cmd" | sed "s/&/\\&amp;/g; s/'/\\&apos;/g; s/\"/\\&quot;/g; s/</\\&lt;/g; s/>/\\&gt;/g")
+            cat > "$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>${label}</string>
+  <key>ProgramArguments</key><array>
+    <string>sh</string>
+    <string>-c</string>
+    <string>cd '${DIR}' &amp;&amp; printf '\n### %s - resumed in %s\n\n' "\$(date '+%Y-%m-%d %H:%M:%S')" '${DIR}' &gt;&gt; '${LOG}' &amp;&amp; ${escaped_cmd} &gt;&gt; '${LOG}' 2&gt;&amp;1; s=\$?; printf '\n### end (exit %s) - %s\n' "\$s" '${DIR}' &gt;&gt; '${LOG}'; word=finished; [ "\$s" -eq 0 ] || word="FAILED (exit \$s)"; osascript -e "display notification \"\$(basename '${DIR}')\" with title \"continuum resume \$word\"" 2&gt;/dev/null || true; launchctl remove '${label}' 2&gt;/dev/null; rm -f '${plist}'</string>
+  </array>
+  <key>StartCalendarInterval</key><dict>
+    <key>Hour</key><integer>$(date -r "$fire_epoch" +%H | sed 's/^0//')</integer>
+    <key>Minute</key><integer>$(date -r "$fire_epoch" +%M | sed 's/^0//')</integer>
+  </dict>
+  <key>StandardOutPath</key><string>${LOG}</string>
+  <key>StandardErrorPath</key><string>${LOG}</string>
+</dict></plist>
+PLIST
+            if launchctl load "$plist" 2>/dev/null; then
+                scheduled=true
+                printf 'Resuming at %s in %s: "%s"\n' "$T" "$DIR" "$PROMPT"
+                printf 'Scheduled via launchd (survives reboot). Label: %s\n' "$label"
+                printf 'Cancel: launchctl remove %s   Log: %s\n' "$label" "$LOG"
+            else
+                rm -f "$plist"
+            fi
+        fi
+    elif command -v systemd-run >/dev/null 2>&1; then
+        unit="continuum-resume-$(date +%s)"
+        wrapper_script="cd '${DIR}' && printf '\n### %s - resumed in %s\n\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" '${DIR}' >> '${LOG}' && ${cmd} >> '${LOG}' 2>&1; s=\$?; printf '\n### end (exit %s) - %s\n' \"\$s\" '${DIR}' >> '${LOG}'; notify-send 'continuum resume finished (exit '\"\$s\"')' '${DIR}' 2>/dev/null || true"
+        if systemd-run --user --unit="$unit" --on-active="${delay}s" --description="continuum resume" sh -c "$wrapper_script" 2>/dev/null; then
+            scheduled=true
+            printf 'Resuming in %s min (at %s) in %s: "%s"\n' "$(( delay / 60 ))" "$T" "$DIR" "$PROMPT"
+            printf 'Scheduled via systemd (survives reboot). Unit: %s\n' "$unit"
+            printf 'Cancel: systemctl --user stop %s.timer   Log: %s\n' "$unit" "$LOG"
+        fi
+    fi
+
+    if [ "$scheduled" = false ]; then
+        # Fallback: nohup sleep. Survives closing the terminal, NOT a reboot.
+        nohup sh -c "
+            sleep \"\$1\"
+            $run_wrapper
+        " _ "$delay" "$DIR" "$cmd" >> "$LOG" 2>&1 &
+        pid=$!
+        printf 'Resuming in %s min (at %s) in %s: "%s"\n' "$(( delay / 60 ))" "$T" "$DIR" "$PROMPT"
+        printf 'Scheduled, PID %s (nohup fallback — will NOT survive reboot).\n' "$pid"
+        printf 'Cancel: kill %s   Log: %s\n' "$pid" "$LOG"
+    fi
+
     printf 'It runs headless - it will edit code unattended.\n'
 }
 
@@ -150,12 +213,62 @@ cmd_watch() {
     done
 }
 
+cmd_estimate() {
+    lines=$(cnt_read) || exit 1
+    first=$(printf '%s\n' "$lines" | head -1)
+    util=$(printf '%s' "$first" | awk '{print $2}')
+    reset=$(printf '%s' "$first" | awk '{print $3}')
+    [ -z "$util" ] && { echo "no utilization data" >&2; exit 1; }
+    [ "$reset" = "-" ] && { echo "no reset time available" >&2; exit 1; }
+    now=$(date +%s)
+    remaining=$(( reset - now ))
+    [ "$remaining" -le 0 ] && { printf 'Window has already reset.\n'; return 0; }
+    util_i=${util%%.*}
+    case "$util_i" in ''|*[!0-9]*) exit 0 ;; esac
+    [ "$util_i" -le 0 ] && { printf 'No usage yet.\n'; return 0; }
+    left=$(( remaining * (100 - util_i) / util_i ))
+    if [ "$left" -ge 3600 ]; then
+        printf 'At this pace, ~%sh %sm left before 100%%\n' "$(( left / 3600 ))" "$(( (left % 3600) / 60 ))"
+    elif [ "$left" -ge 60 ]; then
+        printf 'At this pace, ~%s min left before 100%%\n' "$(( left / 60 ))"
+    else
+        printf 'At this pace, less than a minute left.\n'
+    fi
+    when=$(cnt_epoch_hhmm "$reset" 2>/dev/null || echo "?")
+    printf 'Currently %s%% used, window resets at %s\n' "$util" "$when"
+}
+
+cmd_history() {
+    hist="$CNT_CFG/.continuum-history.log"
+    if [ ! -f "$hist" ]; then
+        echo "No history yet. History is recorded on each status/hook check."
+        return 0
+    fi
+    tail -20 "$hist"
+}
+
+cmd_cleanup() {
+    cleaned=0
+    for f in "$CNT_CFG"/.continuum-warned-* "$CNT_CFG"/.continuum-warned7d-* "$CNT_CFG"/.continuum-cache-*; do
+        [ -f "$f" ] || continue
+        age=$(find "$f" -mmin +1440 2>/dev/null)
+        if [ -n "$age" ]; then
+            rm -f "$f"
+            cleaned=$((cleaned + 1))
+        fi
+    done
+    printf 'Cleaned %s stale files.\n' "$cleaned"
+}
+
 case "${1:-}" in
     status|"")  cmd_status ;;
     reset)      cmd_reset ;;
     providers)  cnt_providers ;;
     watch)      shift; cmd_watch "$@" ;;
     resume)     shift; cmd_resume "$@" ;;
+    estimate)   cmd_estimate ;;
+    history)    cmd_history ;;
+    cleanup)    cmd_cleanup ;;
     -h|--help)  usage ;;
     *)          echo "continuum: unknown command '$1'" >&2; usage >&2; exit 1 ;;
 esac

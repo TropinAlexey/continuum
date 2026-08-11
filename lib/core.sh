@@ -41,15 +41,48 @@ cnt_providers() {
     done | sort -u
 }
 
-# cnt_read -> the provider's lines on stdout, non-zero on failure
-cnt_read() {
-    p=$(cnt_provider_path "$CNT_PROVIDER") || {
-        echo "unknown provider '$CNT_PROVIDER' (have: $(cnt_providers | tr '\n' ' '))" >&2
+# cnt_read_single <provider> -> that provider's lines on stdout
+cnt_read_single() {
+    p=$(cnt_provider_path "$1") || {
+        echo "unknown provider '$1' (have: $(cnt_providers | tr '\n' ' '))" >&2
         return 1
     }
     out=$(sh "$p") || return 1
-    [ -n "$out" ] || { echo "provider '$CNT_PROVIDER' returned nothing" >&2; return 1; }
+    [ -n "$out" ] || { echo "provider '$1' returned nothing" >&2; return 1; }
     printf '%s\n' "$out"
+}
+
+# cnt_read -> the provider's lines on stdout, non-zero on failure.
+# Supports comma-separated providers (CONTINUUM_PROVIDER=anthropic,spend):
+# runs all, keeps the line with the highest utilization as the primary.
+cnt_read() {
+    case "$CNT_PROVIDER" in
+        *,*)
+            best_util=0; best_line=""; rest=""
+            IFS=','
+            for prov in $CNT_PROVIDER; do
+                unset IFS
+                out=$(cnt_read_single "$prov") || continue
+                line1=$(printf '%s\n' "$out" | head -1)
+                u=$(printf '%s' "$line1" | awk '{print $2}')
+                u_i=${u%%.*}
+                case "$u_i" in ''|*[!0-9]*) u_i=0 ;; esac
+                if [ "$u_i" -gt "$best_util" ]; then
+                    best_util=$u_i; best_line="$line1"
+                fi
+                rest="${rest}$(printf '%s\n' "$out" | tail -n +2)
+"
+            done
+            unset IFS
+            [ -z "$best_line" ] && { echo "all providers failed" >&2; return 1; }
+            printf '%s\n' "$best_line"
+            [ -n "$(printf '%s' "$rest" | tr -d '[:space:]')" ] && printf '%s\n' "$rest" | grep .
+            return 0
+            ;;
+        *)
+            cnt_read_single "$CNT_PROVIDER"
+            ;;
+    esac
 }
 
 # cnt_field N < lines -> Nth whitespace field of the first line
@@ -85,6 +118,16 @@ cnt_num() {
     v=$(printf '%s' "$1" | sed 's/^0*//')
     [ -z "$v" ] && v=0
     printf '%s' "$v"
+}
+
+# cnt_notify "title" "message" - desktop notification, best-effort, never fails
+cnt_notify() {
+    title="$1"; msg="$2"
+    if command -v osascript >/dev/null 2>&1; then
+        osascript -e "display notification \"$msg\" with title \"$title\"" 2>/dev/null || true
+    elif command -v notify-send >/dev/null 2>&1; then
+        notify-send "$title" "$msg" 2>/dev/null || true
+    fi
 }
 
 # cnt_hhmm_delay "19:40" -> seconds until the next occurrence of HH:MM (local)

@@ -55,35 +55,82 @@ else
     rm -f "$failed"
 fi
 
-# First line is the primary window: <window> <utilization> <reset_epoch>
+# Check both primary (5h) and secondary (7d) windows. Either can trigger a warning.
+# Primary window
 util=$(printf '%s\n' "$lines" | cnt_field 2)
 reset=$(printf '%s\n' "$lines" | cnt_field 3)
 [ -z "$util" ] && exit 0
 
 threshold="${CONTINUUM_THRESHOLD:-80}"
-util_i=${util%%.*}                            # integer compare (utilization can be "46.0")
+util_i=${util%%.*}
 case "$util_i" in ''|*[!0-9]*) exit 0 ;; esac
 
-# Highest tier the current utilization has reached (tiers below the floor are ignored).
 tier=0
-tiers=""                                       # active tiers, for the message
+tiers=""
 for t in ${CONTINUUM_TIERS:-80 90 95 99}; do
     [ "$t" -lt "$threshold" ] && continue
     tiers="${tiers:+$tiers/}$t"
     [ "$util_i" -ge "$t" ] && [ "$t" -gt "$tier" ] && tier=$t
 done
-[ "$tier" -eq 0 ] && exit 0                   # below the floor
-[ "$tier" -le "$warned" ] && exit 0           # already warned at this tier or higher
+
+# Secondary (weekly) window: separate flag, separate tiers.
+flag7="$CNT_CFG/.continuum-warned7d-$sid"
+warned7=0
+[ -f "$flag7" ] && warned7=$(cat "$flag7")
+case "$warned7" in ''|*[!0-9]*) warned7=0 ;; esac
+
+threshold7="${CONTINUUM_THRESHOLD_7D:-70}"
+tier7=0
+tiers7=""
+line2=$(printf '%s\n' "$lines" | awk 'NR==2')
+if [ -n "$line2" ]; then
+    util7=$(printf '%s' "$line2" | awk '{print $2}')
+    util7_i=${util7%%.*}
+    case "$util7_i" in ''|*[!0-9]*) util7_i=0 ;; esac
+    for t in ${CONTINUUM_TIERS_7D:-70 85 95}; do
+        [ "$t" -lt "$threshold7" ] && continue
+        tiers7="${tiers7:+$tiers7/}$t"
+        [ "$util7_i" -ge "$t" ] && [ "$t" -gt "$tier7" ] && tier7=$t
+    done
+fi
+
+# Skip if neither window crossed a new tier.
+primary_new=false
+[ "$tier" -gt 0 ] && [ "$tier" -gt "$warned" ] && primary_new=true
+weekly_new=false
+[ "$tier7" -gt 0 ] && [ "$tier7" -gt "$warned7" ] && weekly_new=true
+[ "$primary_new" = false ] && [ "$weekly_new" = false ] && exit 0
 
 when=""
 [ -n "$reset" ] && [ "$reset" != "-" ] && when=$(cnt_epoch_hhmm "$reset" 2>/dev/null || echo "")
 
-# Any window beyond the first, for context ("weekly window 41.0%").
 rest=$(printf '%s\n' "$lines" | awk 'NR>1 {printf "%s window %s%%, ", $1, $2}' | sed 's/, $//')
 
-printf '%s' "$tier" > "$flag"
+# Build reason message depending on which windows triggered.
+reason=""
+if [ "$primary_new" = true ]; then
+    printf '%s' "$tier" > "$flag"
+    reason="[continuum] The primary usage window is ${util_i}% used (crossed the ${tier}% tier)${when:+, resets at ${when}}"
+fi
+if [ "$weekly_new" = true ]; then
+    printf '%s' "$tier7" > "$flag7"
+    if [ -n "$reason" ]; then
+        reason="${reason}. The weekly window also crossed the ${tier7}% tier (${util7_i}% used)"
+    else
+        reason="[continuum] The weekly window is ${util7_i}% used (crossed the ${tier7}% tier)"
+        [ -n "$when" ] && reason="${reason}. Primary: ${util_i}%${when:+, resets at ${when}}"
+    fi
+fi
+[ -n "$rest" ] && [ "$primary_new" = true ] && reason="${reason}. Also: ${rest}"
 
-# Stop hook contract: {"decision":"block","reason":"..."} feeds the reason back to Claude.
+reason="${reason}. Do not end the turn silently: run the session-budget skill - briefly state where we stopped, then use AskUserQuestion to ask the user how to spend the rest of the window, offering the options from that skill."
+if [ "$primary_new" = true ]; then
+    reason="${reason} Primary tiers fire once each (${tiers})."
+fi
+if [ "$weekly_new" = true ]; then
+    reason="${reason} Weekly tiers fire once each (${tiers7})."
+fi
+
 cat <<EOF
-{"decision":"block","reason":"[continuum] The primary usage window is ${util_i}% used (crossed the ${tier}% tier)${when:+, resets at ${when}}${rest:+. Also: ${rest}}. Do not end the turn silently: run the session-budget skill - briefly state where we stopped, then use AskUserQuestion to ask the user how to spend the rest of the window, offering the options from that skill. This fires once per tier (${tiers}), so the next warning only comes if usage climbs into the next tier."}
+{"decision":"block","reason":"${reason}"}
 EOF
