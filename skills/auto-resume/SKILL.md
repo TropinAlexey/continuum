@@ -30,7 +30,9 @@ picks up where it stopped once the window resets.
 
 - The resumed run is headless (`-p`) with `acceptEdits`: it edits code with nobody watching.
   Warn the user for risky tasks and keep the prompt narrow.
-- This only works while tokens remain. Once the limit is hit, the user runs the command
-  themselves from a normal terminal: `continuum resume 19:40`.
-- A reboot kills the scheduled process (`nohup` on Unix, a hidden process on Windows — not
-  `launchd`/`systemd`/Task Scheduler). Warn if the reset is hours away.
+- The prompt MUST be a complete, self-contained instruction — not "continue" or a question.
+  The resumed session has no human to answer questions. continuum appends an autonomy
+  directive automatically, but the task itself must be concrete: "finish X, run tests,
+  commit" — not "should we do X?".
+- On macOS/Linux the resume survives reboots (launchd/systemd). On other systems the
+  fallback is `nohup` which does NOT survive reboot — warn if the reset is hours away.

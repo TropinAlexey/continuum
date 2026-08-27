@@ -77,6 +77,8 @@ cmd_resume() {
     T="${1:-}"; [ -n "$T" ] || { echo "continuum resume: need HH:MM" >&2; exit 1; }
     DIR="${2:-$PWD}"
     PROMPT="${3:-continue, please}"
+    # Headless sessions must never block waiting for input that will never come.
+    PROMPT="$PROMPT. Work autonomously: do not ask questions or wait for confirmation — make reasonable decisions, commit results when done, and report what you did in the final message."
     LOG="$CNT_CFG/continuum-resume.log"
 
     [ -d "$DIR" ] || { echo "no such directory: $DIR" >&2; exit 1; }

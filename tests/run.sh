@@ -67,8 +67,9 @@ case "$out" in *"copying from"*) bad "piped install never copies the cwd" "$out"
 
 echo "resume:"
 dry() { CONTINUUM_DRY_RUN=1 CONTINUUM_RESUME_CMD="$1" sh "$ROOT/bin/continuum" resume 23:59 "$ROOT" "$2" 2>&1; }
-check "default agent is claude"   'claude --continue -p "finish it"' "$(dry '' 'finish it')"
-check "swappable agent"           'sh exec "run it"'                 "$(dry 'sh exec "{prompt}"' 'run it')"
+check "default agent is claude"   'claude --continue -p "finish it.' "$(dry '' 'finish it')"
+check "default agent autonomous"  'Work autonomously'                "$(dry '' 'finish it')"
+check "swappable agent"           'sh exec "run it.'                 "$(dry 'sh exec "{prompt}"' 'run it')"
 check "template without {prompt}" 'sh --continue'                    "$(dry 'sh --continue' 'ignored')"
 check "hostile prompt escaped"    '\"the\"'                        "$(dry 'sh run "{prompt}"' 'fix "the" bug')"
 # No dry run here: the PATH check only runs on the real scheduling path.

@@ -1,9 +1,24 @@
 # continuum
 
+> **🇷🇺 Русский** | **🇬🇧 [English](README.en.md)**
+
 **Видишь лимит заранее. Решаешь, что делать с оставшимся. Продолжаешь с того же места.**
 
 [![ci](https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg)](https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+---
+
+## What's new
+
+**v0.3.1** — Resume доводит дело до конца.
+
+- **Автономный resume.** К каждому headless-промпту автоматически дописывается инструкция
+  работать самостоятельно: не задавать вопросов, не ждать подтверждений, коммитить результат.
+  Раньше resume мог проснуться, спросить «коммитить?» в пустоту и остановиться.
+- **Отчёт при старте сессии.** `SessionStart`-хук проверяет `continuum-resume.log` и показывает
+  сводку завершённых resume за последние 24 часа — что, где, когда, exit code, первые строки
+  результата. Больше не нужно гадать, сработал ли ночной resume.
 
 ---
 
@@ -303,7 +318,7 @@ Claude Code вызывает `Stop`-хук каждый раз когда Claude
 ## Участие
 
 ```
-sh tests/run.sh          # 48 тестов, mock-провайдер, без сети
+sh tests/run.sh          # 49 тестов, mock-провайдер, без сети
 pwsh tests/run.ps1       # тот же набор для PowerShell
 ```
 
