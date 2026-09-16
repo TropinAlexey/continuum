@@ -136,7 +136,12 @@ cmd_resume() {
         fire_epoch=$(( $(date +%s) + delay ))
         fire_date=$(date -r "$fire_epoch" +"%Y-%m-%dT%H:%M:%S" 2>/dev/null) || fire_date=""
         if [ -n "$fire_date" ]; then
-            # The plist runs a shell snippet that does: cd DIR && cmd >> LOG; notify; self-clean.
+            # Wakelock: prevent sleep during the wait AND during execution.
+            # 1. Pre-emptive caffeinate keeps the machine awake until the job fires.
+            wl_pidfile=$(cnt_wakelock_start "$((delay + 300))")
+            # 2. The plist wraps the command with caffeinate -i for the execution phase.
+            wl_cleanup=""
+            [ -n "$wl_pidfile" ] && wl_cleanup="kill \$(cat '${wl_pidfile}') 2&gt;/dev/null || true; rm -f '${wl_pidfile}';"
             escaped_cmd=$(printf '%s' "$cmd" | sed "s/&/\\&amp;/g; s/'/\\&apos;/g; s/\"/\\&quot;/g; s/</\\&lt;/g; s/>/\\&gt;/g")
             cat > "$plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -144,9 +149,11 @@ cmd_resume() {
 <plist version="1.0"><dict>
   <key>Label</key><string>${label}</string>
   <key>ProgramArguments</key><array>
+    <string>caffeinate</string>
+    <string>-i</string>
     <string>sh</string>
     <string>-c</string>
-    <string>cd '${DIR}' &amp;&amp; printf '\n### %s - resumed in %s\n\n' "\$(date '+%Y-%m-%d %H:%M:%S')" '${DIR}' &gt;&gt; '${LOG}' &amp;&amp; ${escaped_cmd} &gt;&gt; '${LOG}' 2&gt;&amp;1; s=\$?; printf '\n### end (exit %s) - %s\n' "\$s" '${DIR}' &gt;&gt; '${LOG}'; word=finished; [ "\$s" -eq 0 ] || word="FAILED (exit \$s)"; osascript -e "display notification \"\$(basename '${DIR}')\" with title \"continuum resume \$word\"" 2&gt;/dev/null || true; launchctl remove '${label}' 2&gt;/dev/null; rm -f '${plist}'</string>
+    <string>cd '${DIR}' &amp;&amp; printf '\n### %s - resumed in %s\n\n' "\$(date '+%Y-%m-%d %H:%M:%S')" '${DIR}' &gt;&gt; '${LOG}' &amp;&amp; ${escaped_cmd} &gt;&gt; '${LOG}' 2&gt;&amp;1; s=\$?; printf '\n### end (exit %s) - %s\n' "\$s" '${DIR}' &gt;&gt; '${LOG}'; word=finished; [ "\$s" -eq 0 ] || word="FAILED (exit \$s)"; osascript -e "display notification \"\$(basename '${DIR}')\" with title \"continuum resume \$word\"" 2&gt;/dev/null || true; ${wl_cleanup}launchctl remove '${label}' 2&gt;/dev/null; rm -f '${plist}'</string>
   </array>
   <key>StartCalendarInterval</key><dict>
     <key>Hour</key><integer>$(date -r "$fire_epoch" +%H | sed 's/^0//')</integer>
@@ -160,31 +167,40 @@ PLIST
                 scheduled=true
                 printf 'Resuming at %s in %s: "%s"\n' "$T" "$DIR" "$PROMPT"
                 printf 'Scheduled via launchd (survives reboot). Label: %s\n' "$label"
+                printf 'Sleep inhibited (caffeinate).\n'
                 printf 'Cancel: launchctl remove %s   Log: %s\n' "$label" "$LOG"
             else
                 rm -f "$plist"
+                [ -n "$wl_pidfile" ] && cnt_wakelock_stop "$wl_pidfile"
             fi
         fi
     elif command -v systemd-run >/dev/null 2>&1; then
         unit="continuum-resume-$(date +%s)"
-        wrapper_script="cd '${DIR}' && printf '\n### %s - resumed in %s\n\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" '${DIR}' >> '${LOG}' && ${cmd} >> '${LOG}' 2>&1; s=\$?; printf '\n### end (exit %s) - %s\n' \"\$s\" '${DIR}' >> '${LOG}'; notify-send 'continuum resume finished (exit '\"\$s\"')' '${DIR}' 2>/dev/null || true"
+        # systemd-inhibit wraps the task to prevent sleep during execution
+        inhibit_prefix=""
+        command -v systemd-inhibit >/dev/null 2>&1 && inhibit_prefix="systemd-inhibit --what=idle:sleep --who=continuum --why=resume"
+        wrapper_script="cd '${DIR}' && printf '\n### %s - resumed in %s\n\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" '${DIR}' >> '${LOG}' && ${inhibit_prefix:+$inhibit_prefix} ${cmd} >> '${LOG}' 2>&1; s=\$?; printf '\n### end (exit %s) - %s\n' \"\$s\" '${DIR}' >> '${LOG}'; notify-send 'continuum resume finished (exit '\"\$s\"')' '${DIR}' 2>/dev/null || true"
         if systemd-run --user --unit="$unit" --on-active="${delay}s" --description="continuum resume" sh -c "$wrapper_script" 2>/dev/null; then
             scheduled=true
             printf 'Resuming in %s min (at %s) in %s: "%s"\n' "$(( delay / 60 ))" "$T" "$DIR" "$PROMPT"
             printf 'Scheduled via systemd (survives reboot). Unit: %s\n' "$unit"
+            [ -n "$inhibit_prefix" ] && printf 'Sleep inhibited (systemd-inhibit).\n'
             printf 'Cancel: systemctl --user stop %s.timer   Log: %s\n' "$unit" "$LOG"
         fi
     fi
 
     if [ "$scheduled" = false ]; then
         # Fallback: nohup sleep. Survives closing the terminal, NOT a reboot.
-        nohup sh -c "
+        # Wakelock wraps the whole process: sleep + task. Releases when it exits.
+        wl_wrap=$(cnt_wakelock_wrap)
+        nohup ${wl_wrap:+$wl_wrap} sh -c "
             sleep \"\$1\"
             $run_wrapper
         " _ "$delay" "$DIR" "$cmd" >> "$LOG" 2>&1 &
         pid=$!
         printf 'Resuming in %s min (at %s) in %s: "%s"\n' "$(( delay / 60 ))" "$T" "$DIR" "$PROMPT"
         printf 'Scheduled, PID %s (nohup fallback — will NOT survive reboot).\n' "$pid"
+        [ -n "${wl_wrap}" ] && printf 'Sleep inhibited (%s).\n' "${wl_wrap%% *}"
         printf 'Cancel: kill %s   Log: %s\n' "$pid" "$LOG"
     fi
 
@@ -252,7 +268,7 @@ cmd_history() {
 
 cmd_cleanup() {
     cleaned=0
-    for f in "$CNT_CFG"/.continuum-warned-* "$CNT_CFG"/.continuum-warned7d-* "$CNT_CFG"/.continuum-cache-*; do
+    for f in "$CNT_CFG"/.continuum-warned-* "$CNT_CFG"/.continuum-warned7d-* "$CNT_CFG"/.continuum-cache-* "$CNT_CFG"/.continuum-wakelock-*; do
         [ -f "$f" ] || continue
         age=$(find "$f" -mmin +1440 2>/dev/null)
         if [ -n "$age" ]; then

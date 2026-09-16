@@ -119,6 +119,50 @@ function Send-CntNotification {
     } catch {}
 }
 
+# --- wakelock (prevent system sleep during scheduled resume) ----------
+# Windows: SetThreadExecutionState via P/Invoke (works on 5.1+).
+# macOS/Linux pwsh: caffeinate / systemd-inhibit (same as the sh version).
+
+function Start-CntWakeLock {
+    param([int]$Seconds)
+    $pidFile = Join-Path $script:CntCfg ".continuum-wakelock-$([int](Get-Date -UFormat %s)).pid"
+    if ($IsWindows -or (-not (Test-Path variable:IsWindows) -and $env:OS -eq 'Windows_NT')) {
+        # Launch a hidden job that holds ES_CONTINUOUS|ES_SYSTEM_REQUIRED
+        $job = Start-Job -ScriptBlock {
+            param($dur)
+            Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class WakeLock { [DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f); }'
+            [WakeLock]::SetThreadExecutionState(0x80000003) | Out-Null  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+            Start-Sleep -Seconds $dur
+            [WakeLock]::SetThreadExecutionState(0x80000000) | Out-Null  # ES_CONTINUOUS (clear)
+        } -ArgumentList $Seconds
+        Set-Content -Path $pidFile -Value "job:$($job.Id)" -NoNewline
+    } elseif ($IsMacOS) {
+        $p = Start-Process -FilePath 'caffeinate' -ArgumentList '-i', '-t', $Seconds -PassThru -WindowStyle Hidden 2>$null
+        if ($p) { Set-Content -Path $pidFile -Value $p.Id -NoNewline }
+        else { return '' }
+    } elseif ($IsLinux -and (Get-Command systemd-inhibit -ErrorAction SilentlyContinue)) {
+        $p = Start-Process -FilePath 'systemd-inhibit' `
+            -ArgumentList '--what=idle:sleep','--who=continuum','--why=resume','sleep',$Seconds `
+            -PassThru -WindowStyle Hidden 2>$null
+        if ($p) { Set-Content -Path $pidFile -Value $p.Id -NoNewline }
+        else { return '' }
+    } else { return '' }
+    return $pidFile
+}
+
+function Stop-CntWakeLock {
+    param([string]$PidFile)
+    if (-not $PidFile -or -not (Test-Path $PidFile)) { return }
+    $id = Get-Content -Path $PidFile -Raw
+    if ($id -match '^job:(\d+)$') {
+        Stop-Job -Id ([int]$Matches[1]) -ErrorAction SilentlyContinue
+        Remove-Job -Id ([int]$Matches[1]) -Force -ErrorAction SilentlyContinue
+    } elseif ($id -match '^\d+$') {
+        Stop-Process -Id ([int]$id) -ErrorAction SilentlyContinue
+    }
+    Remove-Item -Path $PidFile -Force -ErrorAction SilentlyContinue
+}
+
 function Get-CntToken {
     if ($env:CLAUDE_CODE_OAUTH_TOKEN) { return $env:CLAUDE_CODE_OAUTH_TOKEN }
     $f = Join-Path $script:CntCfg '.credentials.json'

@@ -94,14 +94,22 @@ function Invoke-Resume {
     New-Item -ItemType Directory -Force -Path $script:CntCfg | Out-Null
     Add-Content -Path $log -Value "`n=== scheduled $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') for $Hhmm in $Dir"
 
+    # Wakelock: prevent system sleep during wait + execution.
+    $wlFile = Start-CntWakeLock ($delay + 7200)
+    $wlCleanup = ''
+    if ($wlFile) { $wlCleanup = "; Stop-CntWakeLock '$wlFile'" }
+
     # Detached: survives closing the terminal, does NOT survive a reboot.
-    $inner = "Start-Sleep -Seconds $delay; Set-Location '$Dir'; $cmd *>> '$log'"
+    # The wakelock is released after the task finishes (or on cancel).
+    $corePs1 = Join-Path $PSScriptRoot '../lib/core.ps1'
+    $inner = ". '$corePs1'; Start-Sleep -Seconds $delay; Set-Location '$Dir'; $cmd *>> '$log'$wlCleanup"
     $ps = (Get-Process -Id $PID).Path
     $proc = Start-Process -FilePath $ps -WindowStyle Hidden -PassThru `
                           -ArgumentList '-NoProfile', '-NonInteractive', '-Command', $inner
 
     "Resuming in {0} min (at {1}) in {2}: `"{3}`"" -f [int]($delay / 60), $Hhmm, $Dir, $Prompt
     "Scheduled, PID {0}. Cancel: Stop-Process -Id {0}   Log: {1}" -f $proc.Id, $log
+    if ($wlFile) { 'Sleep inhibited (wakelock). Releases after task completion.' }
     'It runs headless - it will edit code unattended.'
 }
 
@@ -166,7 +174,7 @@ function Invoke-History {
 function Invoke-Cleanup {
     $cleaned = 0
     $cutoff = (Get-Date).AddHours(-24)
-    foreach ($pattern in @('.continuum-warned-*', '.continuum-warned7d-*', '.continuum-cache-*')) {
+    foreach ($pattern in @('.continuum-warned-*', '.continuum-warned7d-*', '.continuum-cache-*', '.continuum-wakelock-*')) {
         Get-ChildItem -Path $script:CntCfg -Filter $pattern -ErrorAction SilentlyContinue |
             Where-Object { $_.LastWriteTime -lt $cutoff } | ForEach-Object {
                 Remove-Item $_.FullName -Force; $cleaned++

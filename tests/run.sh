@@ -153,6 +153,30 @@ out=$(CONTINUUM_CACHE_MIN=0 CONTINUUM_MOCK="50.0 75.0" hook wk7 '{"session_id":"
 out=$(CONTINUUM_CACHE_MIN=0 CONTINUUM_MOCK="50.0 90.0" hook wk7 '{"session_id":"wk7"}')
 check "weekly next tier fires" "weekly window" "$out"
 
+echo "wakelock:"
+wl_wrap=$(. "$ROOT/lib/core.sh" && cnt_wakelock_wrap)
+case "$(uname)" in
+    Darwin) check "wakelock wrap is caffeinate" "caffeinate" "$wl_wrap" ;;
+    Linux)  check "wakelock wrap is systemd-inhibit" "systemd-inhibit" "$wl_wrap" ;;
+    *)      [ -z "$wl_wrap" ] && ok "wakelock wrap empty on unsupported" || bad "wakelock wrap on unsupported" "$wl_wrap" ;;
+esac
+
+wl_pf=$(. "$ROOT/lib/core.sh" && cnt_wakelock_start 5)
+if [ -n "$wl_pf" ]; then
+    [ -f "$wl_pf" ] && ok "wakelock pidfile created" || bad "wakelock pidfile created" "missing $wl_pf"
+    wl_pid=$(cat "$wl_pf")
+    kill -0 "$wl_pid" 2>/dev/null && ok "wakelock process alive" || bad "wakelock process alive" "dead"
+    . "$ROOT/lib/core.sh" && cnt_wakelock_stop "$wl_pf"
+    kill -0 "$wl_pid" 2>/dev/null && bad "wakelock stopped" "still alive" || ok "wakelock stopped"
+    [ ! -f "$wl_pf" ] && ok "wakelock pidfile cleaned" || bad "wakelock pidfile cleaned" "still exists"
+else
+    printf '  skip wakelock start/stop (no tool available)\n'
+fi
+
+# nohup resume path should mention sleep inhibition
+out=$(CONTINUUM_DRY_RUN=1 sh "$ROOT/bin/continuum" resume 23:59 "$ROOT" "test task" 2>&1)
+check "dry run resume works with wakelock" "would sleep" "$out"
+
 echo "frugal gate:"
 # The PreToolUse hook blocks Agent when CONTINUUM_FRUGAL=1
 out=$(printf '{"tool_name":"Agent"}' | CONTINUUM_FRUGAL=1 sh "$ROOT/hooks/frugal-gate.sh" 2>/dev/null)

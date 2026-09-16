@@ -46,6 +46,18 @@ fi
 
 chmod +x "$DEST/bin/continuum" "$DEST/hooks/"*.sh "$DEST/providers/"*.sh 2>/dev/null || true
 
+# Copy statusline hook and auto-configure it in settings.json
+claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+claude_hooks="$claude_dir/hooks"
+mkdir -p "$claude_hooks" 2>/dev/null || true
+cp "$DEST/hooks/statusline.sh" "$claude_hooks/statusline.sh" 2>/dev/null || true
+
+settings="$claude_dir/settings.json"
+if [ -f "$settings" ] && ! grep -q '"statusLine"' "$settings"; then
+    awk 'NR==1{print; print "  \"statusLine\": { \"type\": \"command\", \"command\": \"sh \\\"$HOME/.claude/hooks/statusline.sh\\\"\" },"; next}{print}' "$settings" > "$settings.tmp" && mv "$settings.tmp" "$settings"
+    say "status line enabled in settings.json"
+fi
+
 # --- 2. put `continuum` on the PATH -----------------------------------
 # First writable directory already on PATH wins; else fall back to ~/.local/bin.
 target=""

@@ -130,6 +130,39 @@ cnt_notify() {
     fi
 }
 
+# --- wakelock (prevent system sleep during scheduled resume) ----------
+# cnt_wakelock_start <seconds> -> prints pidfile path (empty if no tool)
+cnt_wakelock_start() {
+    _wl_pf="$CNT_CFG/.continuum-wakelock-$(date +%s).pid"
+    case "$(uname)" in
+        Darwin)
+            command -v caffeinate >/dev/null 2>&1 || return 0
+            caffeinate -i -t "$1" >/dev/null 2>&1 &
+            printf '%s' "$!" > "$_wl_pf" ;;
+        Linux)
+            command -v systemd-inhibit >/dev/null 2>&1 || return 0
+            systemd-inhibit --what=idle:sleep --who=continuum --why=resume \
+                sleep "$1" >/dev/null 2>&1 &
+            printf '%s' "$!" > "$_wl_pf" ;;
+        *) return 0 ;;
+    esac
+    printf '%s' "$_wl_pf"
+}
+
+# cnt_wakelock_stop <pidfile>
+cnt_wakelock_stop() {
+    [ -f "$1" ] || return 0
+    kill "$(cat "$1")" 2>/dev/null || true; rm -f "$1"
+}
+
+# cnt_wakelock_wrap -> prefix command for wrapping a process (empty if unavailable)
+cnt_wakelock_wrap() {
+    case "$(uname)" in
+        Darwin) command -v caffeinate >/dev/null 2>&1 && printf 'caffeinate -i' ;;
+        Linux)  command -v systemd-inhibit >/dev/null 2>&1 && printf 'systemd-inhibit --what=idle:sleep --who=continuum --why=resume' ;;
+    esac
+}
+
 # cnt_hhmm_delay "19:40" -> seconds until the next occurrence of HH:MM (local)
 cnt_hhmm_delay() {
     case "$1" in

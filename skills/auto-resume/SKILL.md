@@ -36,3 +36,5 @@ picks up where it stopped once the window resets.
   commit" — not "should we do X?".
 - On macOS/Linux the resume survives reboots (launchd/systemd). On other systems the
   fallback is `nohup` which does NOT survive reboot — warn if the reset is hours away.
+- System sleep is prevented automatically (caffeinate on macOS, systemd-inhibit on Linux,
+  SetThreadExecutionState on Windows). The wakelock releases when the task finishes.
