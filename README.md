@@ -6,7 +6,7 @@
 
 > **🇬🇧 English** | **🇷🇺 [Русский](README.ru.md)**
 
-**See the limit coming. Decide what to do with what's left. Pick up where you stopped.**
+**See the limit coming. Decide what to do with what's left. Auto pick up where you stopped.**
 
 [![version: 0.5.0](https://img.shields.io/badge/version-0.5.0-brightgreen.svg)](https://github.com/TropinAlexey/continuum/releases) [![ci](https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg)](https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml) [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
