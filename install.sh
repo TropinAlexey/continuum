@@ -1,5 +1,5 @@
 #!/bin/sh
-# continuum installer for macOS and Linux.
+# continuum installer for macOS, Linux, and BSD.
 #
 #   curl -fsSL https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.sh | sh
 #

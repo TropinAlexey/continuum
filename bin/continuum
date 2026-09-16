@@ -174,6 +174,16 @@ PLIST
                 [ -n "$wl_pidfile" ] && cnt_wakelock_stop "$wl_pidfile"
             fi
         fi
+    elif [ "$(uname)" = "FreeBSD" ] && command -v daemon >/dev/null 2>&1; then
+        # FreeBSD daemon(8) — detaches cleanly, survives logout but not reboot.
+        daemon_log="$LOG"
+        wrapper_script="sleep ${delay} && cd '${DIR}' && printf '\n### %s - resumed in %s\n\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" '${DIR}' >> '${daemon_log}' && ${cmd} >> '${daemon_log}' 2>&1; s=\$?; printf '\n### end (exit %s) - %s\n' \"\$s\" '${DIR}' >> '${daemon_log}'"
+        daemon -p "$CNT_CFG/.continuum-daemon.pid" sh -c "$wrapper_script"
+        pid=$(cat "$CNT_CFG/.continuum-daemon.pid" 2>/dev/null || echo "?")
+        scheduled=true
+        printf 'Resuming in %s min (at %s) in %s: "%s"\n' "$(( delay / 60 ))" "$T" "$DIR" "$PROMPT"
+        printf 'Scheduled via daemon(8) (survives logout, NOT reboot). PID: %s\n' "$pid"
+        printf 'Cancel: kill %s   Log: %s\n' "$pid" "$LOG"
     elif command -v systemd-run >/dev/null 2>&1; then
         unit="continuum-resume-$(date +%s)"
         # systemd-inhibit wraps the task to prevent sleep during execution

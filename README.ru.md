@@ -4,7 +4,7 @@
 
 **Видишь лимит заранее. Решаешь, что делать с оставшимся. Продолжаешь с того же места.**
 
-[![version: 0.4.0](https://img.shields.io/badge/version-0.4.0-brightgreen.svg)](https://github.com/TropinAlexey/continuum/releases)
+[![version: 0.5.0](https://img.shields.io/badge/version-0.5.0-brightgreen.svg)](https://github.com/TropinAlexey/continuum/releases)
 [![ci](https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg)](https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -12,7 +12,14 @@
 
 ## What's new
 
-**v0.4.0** — Resume не даёт машине заснуть.
+**v0.5.0** — Поддержка BSD.
+
+- **FreeBSD / OpenBSD / NetBSD.** Все хуки и провайдеры работают из коробки (POSIX sh).
+  `continuum resume` использует `daemon(8)` на FreeBSD для чистого detach; на остальных BSD —
+  `nohup` fallback.
+
+<details>
+<summary>v0.4.0 — Resume не даёт машине заснуть.</summary>
 
 - **Автоматический wakelock.** `continuum resume` теперь сам предотвращает засыпание системы
   на время ожидания и выполнения задачи. macOS — `caffeinate`, Linux — `systemd-inhibit`,
@@ -20,6 +27,7 @@
   задачи. Больше не нужно вручную запускать `caffeinate`.
 - **Статуслайн.** Новый хук `hooks/statusline.sh` показывает процент использования лимита
   прямо в статусной строке Claude Code — с цветовой индикацией (зелёный / жёлтый / красный).
+</details>
 
 <details>
 <summary>v0.3.1 — Resume доводит дело до конца.</summary>
@@ -75,7 +83,7 @@
    Никогда не решает за тебя.
 
 5. **`continuum resume`** — планирует `claude --continue -p "$PROMPT"` на после сброса.
-   По умолчанию через `launchd` (macOS) или `systemd-run` (Linux) — переживает ребут.
+   По умолчанию через `launchd` (macOS), `systemd-run` (Linux) или `daemon(8)` (FreeBSD).
    Если ни один не доступен — `nohup sleep` (переживает закрытие терминала, не ребут).
    Лог (`~/.claude/continuum-resume.log`) помечает `### resumed in DIR` / `### end (exit N)`
    вокруг запуска. По завершению — десктопное уведомление.
@@ -198,6 +206,7 @@ CONTINUUM_RESUME_CMD='opencode run "{prompt}"'  continuum resume 21:41 "$PWD" "f
 |---|---|---|---|
 | macOS | `launchd` (one-shot plist) | да | `caffeinate -i` |
 | Linux | `systemd-run --user` (transient timer) | да | `systemd-inhibit` |
+| FreeBSD | `daemon(8)` | только logout | — |
 | Windows | detached process | нет | `SetThreadExecutionState` |
 | Fallback | `nohup sleep` | нет | `caffeinate` / `systemd-inhibit` |
 
@@ -250,6 +259,7 @@ CONTINUUM_PROVIDER=anthropic,spend continuum status
 |---|---|---|
 | macOS | `sh` | работает из коробки |
 | Linux | `sh` | работает из коробки |
+| FreeBSD / OpenBSD / NetBSD | `sh` | работает из коробки |
 | Windows + Git Bash | `sh` | работает из коробки |
 | Windows без Git Bash | PowerShell | `.ps1`, подключить ниже |
 
@@ -344,8 +354,9 @@ Claude Code вызывает `Stop`-хук каждый раз когда Claude
 **`continuum resume` не сработал.** Проверь `~/.claude/continuum-resume.log` — ищи маркеры
 `### resumed in DIR` / `### end (exit N)`. Лог общий для всех проектов, `grep` по директории.
 На macOS — `launchctl list | grep continuum`. На Linux —
-`systemctl --user list-timers | grep continuum`. Десктопное уведомление тоже срабатывает
-по завершению; если ни `osascript` ни `notify-send` не доступны — только лог.
+`systemctl --user list-timers | grep continuum`. На FreeBSD — `ps aux | grep continuum`.
+Десктопное уведомление тоже срабатывает по завершению; если ни `osascript` ни `notify-send`
+не доступны — только лог.
 
 **Предупреждение есть, Claude игнорирует.** Reason просит Claude запустить скилл; модель
 может решить иначе. Понизь `CONTINUUM_THRESHOLD`.

@@ -34,7 +34,8 @@ picks up where it stopped once the window resets.
   The resumed session has no human to answer questions. continuum appends an autonomy
   directive automatically, but the task itself must be concrete: "finish X, run tests,
   commit" — not "should we do X?".
-- On macOS/Linux the resume survives reboots (launchd/systemd). On other systems the
-  fallback is `nohup` which does NOT survive reboot — warn if the reset is hours away.
-- System sleep is prevented automatically (caffeinate on macOS, systemd-inhibit on Linux,
-  SetThreadExecutionState on Windows). The wakelock releases when the task finishes.
+- On macOS/Linux the resume survives reboots (launchd/systemd). On FreeBSD, daemon(8) is
+  used (survives logout, not reboot). On other systems the fallback is `nohup` which does
+  NOT survive reboot — warn if the reset is hours away.
+- System sleep is prevented automatically (caffeinate on macOS, systemd-inhibit on Linux).
+  BSD and other systems have no wakelock — warn the user to disable sleep manually.
