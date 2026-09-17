@@ -73,6 +73,13 @@ for t in ${CONTINUUM_TIERS:-80 90 95 99}; do
     [ "$util_i" -ge "$t" ] && [ "$t" -gt "$tier" ] && tier=$t
 done
 
+# If utilization dropped below the floor threshold, reset the flag so tiers
+# re-arm. This handles limit top-ups and window rollovers.
+if [ "$util_i" -lt "$threshold" ] && [ "$warned" -gt 0 ]; then
+    rm -f "$flag"
+    warned=0
+fi
+
 # Secondary (weekly) window: separate flag, separate tiers.
 flag7="$CNT_CFG/.continuum-warned7d-$sid"
 warned7=0
@@ -92,6 +99,12 @@ if [ -n "$line2" ]; then
         tiers7="${tiers7:+$tiers7/}$t"
         [ "$util7_i" -ge "$t" ] && [ "$t" -gt "$tier7" ] && tier7=$t
     done
+fi
+
+# Reset weekly flag if utilization dropped below weekly threshold.
+if [ -n "$line2" ] && [ "$util7_i" -lt "$threshold7" ] && [ "$warned7" -gt 0 ]; then
+    rm -f "$flag7"
+    warned7=0
 fi
 
 # Skip if neither window crossed a new tier.
