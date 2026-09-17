@@ -190,5 +190,36 @@ echo "multi-provider:"
 out=$(CONTINUUM_PROVIDER=mock,mock sh "$ROOT/bin/continuum" status 2>&1)
 check "multi-provider status works" "5 hours" "$out"
 
+echo "statusline:"
+# Prepare a fake cache with known data
+sl_dir="$TMP/sl_test"; mkdir -p "$sl_dir"
+now=$(date +%s)
+d_reset=$(( now + 3600 ))
+w_reset=$(( now + 4 * 86400 ))
+printf '5h 46.0 %s\n7d 94.0 %s\n' "$d_reset" "$w_reset" > "$sl_dir/.continuum-cache-mock"
+
+sl_out=$(CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/hooks/statusline.sh" 2>/dev/null)
+check "statusline shows daily percent" "46%" "$sl_out"
+check "statusline shows weekly percent" "94%" "$sl_out"
+check "statusline shows today for daily" "today" "$sl_out"
+
+# Test config commands
+out=$(CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/bin/continuum" statusline)
+check "statusline cmd shows format" "format" "$out"
+
+CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/bin/continuum" statusline today "сегодня" >/dev/null
+sl_out=$(CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/hooks/statusline.sh" 2>/dev/null)
+check "statusline respects today config" "сегодня" "$sl_out"
+
+CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/bin/continuum" statusline reset >/dev/null
+sl_out=$(CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/hooks/statusline.sh" 2>/dev/null)
+check "statusline reset restores defaults" "today" "$sl_out"
+
+# Test format-single (no weekly data)
+printf '5h 46.0 %s\n' "$d_reset" > "$sl_dir/.continuum-cache-mock"
+sl_out=$(CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/hooks/statusline.sh" 2>/dev/null)
+check "statusline single shows daily" "46%" "$sl_out"
+case "$sl_out" in *94%*) bad "statusline single hides weekly" "found 94% in: $sl_out" ;; *) ok "statusline single hides weekly" ;; esac
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

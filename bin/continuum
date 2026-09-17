@@ -10,6 +10,8 @@
 #                               schedule the agent to pick up after the reset
 #   continuum history           show recent usage snapshots
 #   continuum cleanup           remove stale flag/cache files (>24h old)
+#   continuum statusline [key value | reset]
+#                               show or configure status-line format
 #
 #   CONTINUUM_PROVIDER=mock continuum status     pick a provider (default: anthropic)
 #   CONTINUUM_RESUME_CMD='codex exec "{prompt}"' pick an agent (default: claude)
@@ -276,6 +278,62 @@ cmd_history() {
     tail -20 "$hist"
 }
 
+cmd_statusline() {
+    conf="$CNT_CFG/.continuum-statusline.conf"
+    key="${1:-}"
+    val="${2:-}"
+
+    if [ -z "$key" ]; then
+        printf 'Status-line config (%s):\n' "$conf"
+        echo "  format        = $(_sl_get FORMAT '{d%}% d {dr} | {w%}% w {wr}')"
+        echo "  format-single = $(_sl_get FORMAT_SINGLE '{d%}% d {dr}')"
+        echo "  time          = $(_sl_get TIME_FORMAT '%H:%M')"
+        echo "  date          = $(_sl_get DATE_FORMAT '%d.%m')"
+        echo "  today         = $(_sl_get TODAY 'today')"
+        echo ""
+        echo "Tokens: {d%} daily%, {w%} weekly%, {dr} daily reset, {wr} weekly reset"
+        return 0
+    fi
+
+    if [ "$key" = "reset" ]; then
+        rm -f "$conf"
+        echo "Status-line config reset to defaults."
+        return 0
+    fi
+
+    [ -n "$val" ] || { echo "continuum statusline: need a value" >&2; exit 1; }
+
+    case "$key" in
+        format)        _sl_set FORMAT "$val" ;;
+        format-single) _sl_set FORMAT_SINGLE "$val" ;;
+        time)          _sl_set TIME_FORMAT "$val" ;;
+        date)          _sl_set DATE_FORMAT "$val" ;;
+        today)         _sl_set TODAY "$val" ;;
+        *)             echo "continuum statusline: unknown key '$key'" >&2
+                       echo "  keys: format, format-single, time, date, today" >&2; exit 1 ;;
+    esac
+    echo "Set $key = $val"
+}
+
+_sl_get() {
+    [ -f "$conf" ] || { printf '%s' "$2"; return; }
+    v=$(grep "^$1=" "$conf" 2>/dev/null | head -1 | cut -d= -f2-)
+    printf '%s' "${v:-$2}"
+}
+
+_sl_set() {
+    conf="$CNT_CFG/.continuum-statusline.conf"
+    mkdir -p "$CNT_CFG" 2>/dev/null || true
+    if [ -f "$conf" ] && grep -q "^$1=" "$conf" 2>/dev/null; then
+        tmp="$conf.tmp"
+        grep -v "^$1=" "$conf" > "$tmp"
+        printf '%s=%s\n' "$1" "$2" >> "$tmp"
+        mv "$tmp" "$conf"
+    else
+        printf '%s=%s\n' "$1" "$2" >> "$conf"
+    fi
+}
+
 cmd_cleanup() {
     cleaned=0
     for f in "$CNT_CFG"/.continuum-warned-* "$CNT_CFG"/.continuum-warned7d-* "$CNT_CFG"/.continuum-cache-* "$CNT_CFG"/.continuum-wakelock-*; do
@@ -298,6 +356,7 @@ case "${1:-}" in
     estimate)   cmd_estimate ;;
     history)    cmd_history ;;
     cleanup)    cmd_cleanup ;;
+    statusline) shift; cmd_statusline "$@" ;;
     -h|--help)  usage ;;
     *)          echo "continuum: unknown command '$1'" >&2; usage >&2; exit 1 ;;
 esac
