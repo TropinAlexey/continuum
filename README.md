@@ -1,8 +1,6 @@
-<p align="center">
-  <img src="assets/logo.png" alt="continuum" width="120">
-</p>
+![continuum](assets/logo.png)
 
-<h1 align="center">continuum</h1>
+# continuum
 
 > **🇬🇧 English** | **🇷🇺 [Русский](README.ru.md)**
 

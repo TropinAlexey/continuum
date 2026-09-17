@@ -248,8 +248,6 @@ CONTINUUM_PROVIDER=anthropic,spend continuum status
 
 ## Все ОС
 
-  
-
 Shell
 
 Статус
