@@ -20,18 +20,20 @@ fi
 
 [ -f "$cache" ] || exit 0
 
-util=$(awk 'NR==1{print $2}' "$cache")
-[ -z "$util" ] && exit 0
+d_util=$(awk 'NR==1{print $2}' "$cache")
+w_util=$(awk 'NR==2{print $2}' "$cache")
+[ -z "$d_util" ] && exit 0
 
-pct=${util%%.*}
-case "$pct" in ''|*[!0-9]*) exit 0 ;; esac
+d_pct=${d_util%%.*}
+case "$d_pct" in ''|*[!0-9]*) exit 0 ;; esac
 
-if [ "$pct" -ge 95 ]; then
-    color='31'   # red
-elif [ "$pct" -ge 80 ]; then
-    color='33'   # yellow
+w_pct=${w_util%%.*}
+case "$w_pct" in ''|*[!0-9]*) w_pct="" ;; esac
+
+cnt_color() { if [ "$1" -ge 95 ]; then printf '31'; elif [ "$1" -ge 80 ]; then printf '33'; else printf '32'; fi; }
+
+if [ -n "$w_pct" ]; then
+    printf '\033[%sm%s%%\033[0m D \033[%sm%s%%\033[0m W' "$(cnt_color "$d_pct")" "$d_pct" "$(cnt_color "$w_pct")" "$w_pct"
 else
-    color='32'   # green
+    printf '\033[%sm%s%%\033[0m' "$(cnt_color "$d_pct")" "$d_pct"
 fi
-
-printf '\033[%sm%s%%\033[0m' "$color" "$pct"
