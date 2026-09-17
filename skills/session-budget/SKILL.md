@@ -38,6 +38,7 @@ Offer 3-4 options that fit the moment, recommended one first:
 | **Finish and wrap up** | Bring the current task to a working state, run the tests, show the diff. No new work. |
 | **Finish the task set, then stop** | Complete the remaining planned tasks (the current TODO batch), then stop — no new scope. Offer this only when what's left is a bounded, known set that plausibly fits the remaining window; skip it if the work is open-ended. |
 | **Save state and schedule a resume** | Commit or stash, then `continuum resume "$(continuum reset)" "$PWD" "<specific task>"` so the session continues itself after the reset. |
+| **Resume after reset (no commit)** | Stash changes (no commit), then schedule `continuum resume` so the session picks up automatically after the reset. The resumed session unstashes first. |
 | **Frugal mode** | Keep going, but: no subagents, no large files into context, short answers. Run `export CONTINUUM_FRUGAL=1` to enforce via hook, suggest `/compact`. |
 | **Cheap tasks only** | Spend the rest on docs, commit messages, README; postpone heavy code analysis. |
 | **Switch model** | Move to a cheaper model (`/model`) for routine work. |
@@ -49,6 +50,13 @@ For "save state and schedule a resume": save state first (commit only with the u
 explicit permission if the project requires it), then call `continuum resume` with a
 **specific** task description, never a generic "continue" — the resumed session runs headless
 and cannot ask follow-up questions.
+
+For "resume after reset (no commit)": `git stash -u`, then schedule the resume with a task
+description that starts with `git stash pop &&` so the resumed session restores the working
+tree before continuing. Example:
+```
+continuum resume "$(continuum reset)" "$PWD" "git stash pop && <specific task description>"
+```
 
 ## Settings
 
