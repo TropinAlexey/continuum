@@ -13,8 +13,11 @@
 </p>
 
 <p align="center">
-[![version: 0.5.0](https://img.shields.io/badge/version-0.5.0-brightgreen.svg)](https://github.com/TropinAlexey/continuum/releases) [![ci](https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg)](https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml) [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.5.0-brightgreen.svg" alt="version: 0.5.0"></a>
+  <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
+
 ---
 
 У AI-агентов есть лимиты использования на временное окно. Когда лимит кончается посреди задачи — сессия встаёт, и ты ждёшь сброса сам. **continuum** следит за бюджетом, предупреждает заранее, и — если выберешь — засыпает до сброса и возобновляет сессию автоматически.
