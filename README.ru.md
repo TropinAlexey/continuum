@@ -5,7 +5,7 @@
 <h1 align="center">continuum</h1>
 
 <p align="center">
-  **🇷🇺 Русский** | **[🇬🇧 English](README.md)**
+  <b><a href="README.md">🇷🇺 English </a></b>  | <b>🇷🇺 Русский</b>
 </p>
 
 <p align="center">
