@@ -145,54 +145,13 @@ See **[docs/harnesses.md](docs/harnesses.md)** — what's tested, what's likely.
 
 `continuum resume` automatically picks the best OS scheduler:
 
-OS
-
-Scheduler
-
-Survives reboot
-
-Wakelock
-
-macOS
-
-`launchd` (one-shot plist)
-
-yes
-
-`caffeinate -i`
-
-Linux
-
-`systemd-run --user` (transient timer)
-
-yes
-
-`systemd-inhibit`
-
-FreeBSD
-
-`daemon(8)`
-
-logout only
-
-—
-
-Windows
-
-detached process
-
-no
-
-`SetThreadExecutionState`
-
-Fallback
-
-`nohup sleep`
-
-no
-
-`caffeinate` / `systemd-inhibit`
-
+| OS | Scheduler | Survives reboot | Wakelock |
+|---|---|---|---|
+| macOS | `launchd` (one-shot plist) | yes | `caffeinate -i` |
+| Linux | `systemd-run --user` (transient timer) | yes | `systemd-inhibit` |
+| FreeBSD | `daemon(8)` | logout only | — |
+| Windows | detached process | no | `SetThreadExecutionState` |
+| Fallback | `nohup sleep` | no | `caffeinate` / `systemd-inhibit` |
 **Wakelock** prevents system sleep automatically — during the wait until reset and during task execution. Releases on completion, on cancel (`kill PID`), or via `continuum cleanup`. No more manual `caffeinate`.
 
 On completion — **desktop notification** (`osascript` on Mac, `notify-send` on Linux). Log (`~/.claude/continuum-resume.log`) marks `### resumed in DIR` / `### end (exit N)` — shared across projects, `grep` by directory to find yours.
@@ -200,43 +159,6 @@ On completion — **desktop notification** (`osascript` on Mac, `notify-send` on
 ## Providers
 
 continuum doesn't know what Anthropic is. It asks a **provider** — "how much is used, when does it reset" — and everything else is provider-agnostic.
-
-### Built-in providers
-
-Provider
-
-What it measures
-
-Requires
-
-`anthropic`
-
-Subscription windows (5h/7d)
-
-Claude Code OAuth token
-
-`spend`
-
-Monthly API key spend
-
-`ANTHROPIC_ADMIN_KEY`, `CONTINUUM_SPEND_CAP` ($ budget, default 100)
-
-`mock`
-
-Fake numbers for tests
-
-nothing
-
-### Custom provider
-
-A provider is a script that prints:
-
-```
-5h 86.5 1783000000
-7d 41.0 1783300000
-```
-
-That's the entire interface. Writing your own takes 10 minutes: **[docs/writing-a-provider.md](docs/writing-a-provider.md)**. Drop it in `~/.claude/providers/` and select with `CONTINUUM_PROVIDER=yours`.
 
 ### Multiple providers at once
 
@@ -248,39 +170,13 @@ Runs both, takes the highest utilization as the primary line. Catches the situat
 
 ## All platforms
 
-Shell
-
-Status
-
-macOS
-
-`sh`
-
-works out of the box
-
-Linux
-
-`sh`
-
-works out of the box
-
-FreeBSD / OpenBSD / NetBSD
-
-`sh`
-
-works out of the box
-
-Windows + Git Bash
-
-`sh`
-
-works out of the box
-
-Windows without Git Bash
-
-PowerShell
-
-`.ps1`, configure below
+| | Shell | Status |
+|---|---|---|
+| macOS | `sh` | works out of the box |
+| Linux | `sh` | works out of the box |
+| FreeBSD / OpenBSD / NetBSD | `sh` | works out of the box |
+| Windows + Git Bash | `sh` | works out of the box |
+| Windows without Git Bash | PowerShell | `.ps1`, configure below |
 
 Claude Code runs hooks through Git Bash on Windows, falls back to PowerShell if Git Bash isn't available. Two implementations, `.sh` and `.ps1`, are tested by the same test suite on all platforms in CI. No python, no node, no `jq` — POSIX `sh` + `curl`, or PowerShell 5.1+.
 
@@ -321,84 +217,20 @@ Add to your `~/.claude/settings.json`:
 The plugin install copies the script automatically. If you installed via the one-liner, the script is already at `~/.claude/hooks/statusline.sh`.
 
 ## Configuration
-
-Variable
-
-Default
-
-What it does
-
-`CONTINUUM_THRESHOLD`
-
-`80`
-
-Primary window threshold (%). Tiers below it are ignored.
-
-`CONTINUUM_TIERS`
-
-`80 90 95 99`
-
-Primary window tiers. Each fires once.
-
-`CONTINUUM_THRESHOLD_7D`
-
-`70`
-
-Weekly window threshold (%).
-
-`CONTINUUM_TIERS_7D`
-
-`70 85 95`
-
-Weekly window tiers.
-
-`CONTINUUM_PROVIDER`
-
-`anthropic`
-
-Which provider to query. Comma-separated for multiple.
-
-`CONTINUUM_RESUME_CMD`
-
-`claude --continue -p "{prompt}" …`
-
-Which agent `resume` wakes. `{prompt}` is the task.
-
-`CONTINUUM_DRY_RUN`
-
-unset
-
-`resume` prints the command instead of scheduling.
-
-`CONTINUUM_OFF`
-
-unset
-
-Disable the Stop hook.
-
-`CONTINUUM_FRUGAL`
-
-unset
-
-`1` — frugal mode: PreToolUse hook blocks Agent.
-
-`CONTINUUM_CACHE_MIN`
-
-`10`
-
-Minutes to cache the provider response. `0` disables cache.
-
-`CONTINUUM_SPEND_CAP`
-
-`100`
-
-Monthly budget in $ for the `spend` provider.
-
-`ANTHROPIC_ADMIN_KEY`
-
-—
-
-Admin API key for the `spend` provider.
+| Variable | Default | What it does |
+|---|---|---|
+| `CONTINUUM_THRESHOLD` | `80` | Primary window threshold (%). Tiers below it are ignored. |
+| `CONTINUUM_TIERS` | `80 90 95 99` | Primary window tiers. Each fires once. |
+| `CONTINUUM_THRESHOLD_7D` | `70` | Weekly window threshold (%). |
+| `CONTINUUM_TIERS_7D` | `70 85 95` | Weekly window tiers. |
+| `CONTINUUM_PROVIDER` | `anthropic` | Which provider to query. Comma-separated for multiple. |
+| `CONTINUUM_RESUME_CMD` | `claude --continue -p "{prompt}" …` | Which agent `resume` wakes. `{prompt}` is the task. |
+| `CONTINUUM_DRY_RUN` | unset | `resume` prints the command instead of scheduling. |
+| `CONTINUUM_OFF` | unset | Disable the Stop hook. |
+| `CONTINUUM_FRUGAL` | unset | `1` — frugal mode: PreToolUse hook blocks Agent. |
+| `CONTINUUM_CACHE_MIN` | `10` | Minutes to cache the provider response. `0` disables cache. |
+| `CONTINUUM_SPEND_CAP` | `100` | Monthly budget in $ for the `spend` provider. |
+| `ANTHROPIC_ADMIN_KEY` | — | Admin API key for the `spend` provider. |
 
 ## How it works
 
