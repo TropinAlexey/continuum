@@ -8,6 +8,8 @@
 #                                schedule `claude --continue` for after the reset
 #   continuum.ps1 history        show recent usage snapshots
 #   continuum.ps1 cleanup        remove stale flag/cache files (>24h old)
+#   continuum.ps1 statusline [key value | reset]
+#                                show or configure status-line format
 
 param(
     [Parameter(Position = 0)][string]$Command = 'status',
@@ -45,7 +47,7 @@ function Invoke-Status {
     $hist = Join-Path $script:CntCfg '.continuum-history.log'
     New-Item -ItemType Directory -Force -Path $script:CntCfg 2>$null | Out-Null
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm'
-    $summary = ($allLines | ForEach-Object { $p = $_.Split(' '); "$($p[0]):$($p[1])%" }) -join ' '
+    $summary = ($allLines | ForEach-Object { $p = $_.Split(' ', [StringSplitOptions]::RemoveEmptyEntries); "$($p[0]):$($p[1])%" }) -join ' '
     try { Add-Content -Path $hist -Value "$ts  $summary" } catch {}
 }
 
@@ -76,8 +78,12 @@ function Invoke-Resume {
 
     $tmpl = Get-CntResumeCmd
 
-    # The prompt ends up inside the command string: neutralise quotes.
-    $cmd = $tmpl.Replace('{prompt}', ($Prompt -replace "'", "''"))
+    # The prompt ends up as PowerShell code inside -Command: neutralise the
+    # characters that would otherwise expand or break quoting at resume time
+    # ($, backtick) or at schedule time ("). Single quotes are doubled for
+    # templates that place {prompt} inside '...'. Mirrors the sh escaping.
+    $escPrompt = $Prompt.Replace('`', '``').Replace('$', '`$').Replace('"', '`"').Replace("'", "''")
+    $cmd = $tmpl.Replace('{prompt}', $escPrompt)
 
     $delay = Get-CntHhmmDelay $Hhmm
 
@@ -101,8 +107,13 @@ function Invoke-Resume {
 
     # Detached: survives closing the terminal, does NOT survive a reboot.
     # The wakelock is released after the task finishes (or on cancel).
+    # Paths are single-quote escaped: a project dir like C:\o'brien must not
+    # break out of Set-Location '...'.
     $corePs1 = Join-Path $PSScriptRoot '../lib/core.ps1'
-    $inner = ". '$corePs1'; Start-Sleep -Seconds $delay; Set-Location '$Dir'; $cmd *>> '$log'$wlCleanup"
+    $escCore = $corePs1.Replace("'", "''")
+    $escDir = $Dir.Replace("'", "''")
+    $escLog = $log.Replace("'", "''")
+    $inner = ". '$escCore'; Start-Sleep -Seconds $delay; Set-Location '$escDir'; $cmd *>> '$escLog'$wlCleanup"
     $ps = (Get-Process -Id $PID).Path
     $proc = Start-Process -FilePath $ps -WindowStyle Hidden -PassThru `
                           -ArgumentList '-NoProfile', '-NonInteractive', '-Command', $inner
@@ -175,12 +186,77 @@ function Invoke-Cleanup {
     $cleaned = 0
     $cutoff = (Get-Date).AddHours(-24)
     foreach ($pattern in @('.continuum-warned-*', '.continuum-warned7d-*', '.continuum-cache-*', '.continuum-wakelock-*')) {
-        Get-ChildItem -Path $script:CntCfg -Filter $pattern -ErrorAction SilentlyContinue |
+        # NB: -Force is load-bearing - without it the provider skips dotfiles
+        # on some platforms (macOS) and cleanup would silently clean nothing.
+        Get-ChildItem -Path $script:CntCfg -Force -Filter $pattern -ErrorAction SilentlyContinue |
             Where-Object { $_.LastWriteTime -lt $cutoff } | ForEach-Object {
                 Remove-Item $_.FullName -Force; $cleaned++
             }
     }
     "Cleaned $cleaned stale files."
+}
+
+# Show or configure the status-line format (mirrors `continuum statusline`).
+# Shares .continuum-statusline.conf with hooks/statusline.ps1 and the sh hook.
+function Get-CntSlConfValue {
+    param([string]$Key, [string]$Default)
+    $conf = Join-Path $script:CntCfg '.continuum-statusline.conf'
+    if (Test-Path $conf) {
+        foreach ($line in (Get-Content -Path $conf)) {
+            if ($line.StartsWith("$Key=", [StringComparison]::Ordinal)) {
+                $v = $line.Substring($Key.Length + 1)
+                if ($v) { return $v }
+                return $Default
+            }
+        }
+    }
+    return $Default
+}
+
+function Set-CntSlConfValue {
+    param([string]$Key, [string]$Val)
+    $conf = Join-Path $script:CntCfg '.continuum-statusline.conf'
+    New-Item -ItemType Directory -Force -Path $script:CntCfg | Out-Null
+    $kept = @()
+    if (Test-Path $conf) {
+        $kept = @(Get-Content -Path $conf | Where-Object { -not $_.StartsWith("$Key=", [StringComparison]::Ordinal) })
+    }
+    Set-Content -Path $conf -Value ($kept + @("$Key=$Val"))
+}
+
+function Invoke-StatuslineConfig {
+    param([string]$Key, [string]$Val)
+    $conf = Join-Path $script:CntCfg '.continuum-statusline.conf'
+
+    if (-not $Key) {
+        "Status-line config ($conf):"
+        "  format        = $(Get-CntSlConfValue 'FORMAT' '{d%}% d {dr} | {w%}% w {wr}')"
+        "  format-single = $(Get-CntSlConfValue 'FORMAT_SINGLE' '{d%}% d {dr}')"
+        "  time          = $(Get-CntSlConfValue 'TIME_FORMAT' '%H:%M')"
+        "  date          = $(Get-CntSlConfValue 'DATE_FORMAT' '%d.%m')"
+        "  today         = $(Get-CntSlConfValue 'TODAY' 'today')"
+        ""
+        "Tokens: {d%} daily%, {w%} weekly%, {dr} daily reset, {wr} weekly reset"
+        return
+    }
+
+    if ($Key -eq 'reset') {
+        Remove-Item -Path $conf -Force -ErrorAction SilentlyContinue
+        'Status-line config reset to defaults.'
+        return
+    }
+
+    if (-not $Val) { throw 'continuum statusline: need a value' }
+
+    switch ($Key) {
+        'format'        { Set-CntSlConfValue 'FORMAT' $Val }
+        'format-single' { Set-CntSlConfValue 'FORMAT_SINGLE' $Val }
+        'time'          { Set-CntSlConfValue 'TIME_FORMAT' $Val }
+        'date'          { Set-CntSlConfValue 'DATE_FORMAT' $Val }
+        'today'         { Set-CntSlConfValue 'TODAY' $Val }
+        default         { throw "continuum statusline: unknown key '$Key'`n  keys: format, format-single, time, date, today" }
+    }
+    "Set $Key = $Val"
 }
 
 switch ($Command) {
@@ -192,5 +268,6 @@ switch ($Command) {
     'resume'    { Invoke-Resume $Arg1 $Arg2 $Arg3 }
     'history'   { Invoke-History }
     'cleanup'   { Invoke-Cleanup }
+    'statusline' { Invoke-StatuslineConfig $Arg1 $Arg2 }
     default     { [Console]::Error.WriteLine("continuum: unknown command '$Command'"); exit 1 }
 }

@@ -26,19 +26,28 @@ if ($event -match '"stop_hook_active"\s*:\s*true') { exit 0 }
 
 $sid = 'unknown'
 if ($event -match '"session_id"\s*:\s*"([^"]+)"') { $sid = $Matches[1] }
+# session_id lands in a filename: allowlist it to close path traversal.
+if ($sid -notmatch '^[A-Za-z0-9_-]+$') {
+    $sid = ($sid -replace '[^A-Za-z0-9_-]', '_')
+    if (-not $sid) { $sid = 'unknown' }
+}
 
 New-Item -ItemType Directory -Force -Path $script:CntCfg | Out-Null
 
 $flag = Join-Path $script:CntCfg ".continuum-warned-$sid"
-if (Test-Path $flag) { exit 0 }                 # warn only once per session
+# NB: no early "warn once then exit" here: tiers escalate (80->90->95->99),
+# so the flag stores the highest tier warned and is compared numerically below.
 
 # Providers hit rate-limited endpoints and this runs after every turn: cache hard,
 # and back off after a failure ("negative cache").
 $ttl    = 10
 if ($env:CONTINUUM_CACHE_MIN) { $ttl = [int]$env:CONTINUUM_CACHE_MIN }
-$cache  = Join-Path $script:CntCfg ".continuum-cache-$($script:CntProvider)"
+$cacheKey = ($script:CntProvider -replace '[^A-Za-z0-9_,-]', '_')
+$cache  = Join-Path $script:CntCfg ".continuum-cache-$cacheKey"
 $failed = "$cache.fail"
-$fresh  = { param($f) (Test-Path $f) -and ((Get-Date) - (Get-Item $f).LastWriteTime).TotalMinutes -lt $ttl }
+# NB: Get-Item throws on dotfiles under macOS PowerShell (Test-Path on the
+# same path returns True), so read mtime via .NET which works everywhere.
+$fresh  = { param($f) (Test-Path $f) -and ((Get-Date) - [System.IO.File]::GetLastWriteTime($f)).TotalMinutes -lt $ttl }
 
 if (& $fresh $failed) { exit 0 }                # recently failed - do not retry yet
 
@@ -57,7 +66,9 @@ if (& $fresh $cache) {
 $first = $lines[0].Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
 if ($first.Count -lt 2) { exit 0 }
 
-$utilInt = [int][math]::Floor([double]::Parse($first[1], [cultureinfo]::InvariantCulture))
+# A custom provider returning garbage must not throw past the trap: parse defensively.
+$utilInt = 0
+try { $utilInt = [int][math]::Floor([double]::Parse($first[1], [cultureinfo]::InvariantCulture)) } catch { $utilInt = 0 }
 
 $threshold = 80
 if ($env:CONTINUUM_THRESHOLD) { $threshold = [int]$env:CONTINUUM_THRESHOLD }
@@ -75,6 +86,10 @@ foreach ($t in $tierList) {
     if ($utilInt -ge $t -and $t -gt $tier) { $tier = $t }
 }
 
+# If utilization dropped below the floor (limit top-up, window rollover),
+# re-arm: tiers fire again on the way back up. Mirrors the sh hook.
+if ($utilInt -lt $threshold -and (Test-Path $flag)) { Remove-Item -Path $flag -Force -ErrorAction SilentlyContinue }
+
 # Weekly window tiers
 $flag7 = Join-Path $script:CntCfg ".continuum-warned7d-$sid"
 $warned7 = 0
@@ -88,13 +103,18 @@ $tier7 = 0; $tiers7Str = ''; $util7Int = 0
 if ($lines.Count -gt 1) {
     $second = $lines[1].Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
     if ($second.Count -ge 2) {
-        $util7Int = [int][math]::Floor([double]::Parse($second[1], [cultureinfo]::InvariantCulture))
+        try { $util7Int = [int][math]::Floor([double]::Parse($second[1], [cultureinfo]::InvariantCulture)) } catch { $util7Int = 0 }
         foreach ($t in $tierList7) {
             if ($t -lt $threshold7) { continue }
             $tiers7Str += $(if ($tiers7Str) { "/$t" } else { "$t" })
             if ($util7Int -ge $t -and $t -gt $tier7) { $tier7 = $t }
         }
     }
+}
+
+# Re-arm the weekly flag on drop below its floor, same as the primary window.
+if ($lines.Count -gt 1 -and $util7Int -lt $threshold7 -and (Test-Path $flag7)) {
+    Remove-Item -Path $flag7 -Force -ErrorAction SilentlyContinue
 }
 
 $primaryNew = ($tier -gt 0 -and $tier -gt $warned)
