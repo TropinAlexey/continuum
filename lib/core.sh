@@ -100,7 +100,48 @@ cnt_field() { awk -v n="$1" 'NR==1{print $n}'; }
 # the LAST one. These return the first.
 cnt_json_str() { grep -o '"'"$1"'"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"//; s/"$//'; }
 cnt_json_num() { grep -o '"'"$1"'"[[:space:]]*:[[:space:]]*[0-9][0-9.]*' | head -1 | sed 's/.*:[[:space:]]*//'; }
-cnt_json_block() { grep -o '"'"$1"'"[[:space:]]*:[[:space:]]*{[^{}]*}' | head -1 | sed 's/^[^{]*{//; s/}$//'; }
+# First {...} block after "key": — brace-counted with string awareness, so a
+# nested object ({"meta":{...}}) or braces inside a string ("a{b") do not cut
+# the match short, and pretty-printed multi-line JSON works too. Prints the
+# block's INNER content (outer braces stripped). Still no jq: plain awk.
+cnt_json_block() {
+    awk -v key="$1" '
+        function scan(   s, i, rest, tmp) {
+            s = $0
+            while ((i = index(s, "\"" key "\"")) > 0) {
+                rest = substr(s, i + length(key) + 2)
+                if (rest ~ /^[[:space:]]*:/) {
+                    tmp = rest
+                    sub(/^[[:space:]]*:[[:space:]]*/, "", tmp)
+                    if (substr(tmp, 1, 1) == "{") { $0 = tmp; return 1 }
+                }
+                s = substr(s, i + 1)
+            }
+            return 0
+        }
+        !started { if (!scan()) next; started = 1; first = 1; depth = 0; buf = "" }
+        started {
+            n = length($0)
+            for (pos = (first ? 2 : 1); pos <= n; pos++) {
+                c = substr($0, pos, 1)
+                if (in_str) {
+                    if (esc) esc = 0
+                    else if (c == "\\") esc = 1
+                    else if (c == "\"") in_str = 0
+                    buf = buf c
+                } else if (c == "\"") { in_str = 1; buf = buf c }
+                else if (c == "{") { depth++; buf = buf c }
+                else if (c == "}") {
+                    if (depth == 0) { print buf; exit }
+                    depth--; buf = buf c
+                }
+                else buf = buf c
+            }
+            buf = buf "\n"
+            first = 0
+        }
+    '
+}
 
 # --- portable date math (GNU and BSD) ----------------------------------
 # cnt_iso_epoch "2026-07-09T17:40:00.180+00:00" -> unix epoch (UTC input)

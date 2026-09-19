@@ -52,6 +52,14 @@ two='{"claudeAiOauth":{"accessToken":"ours","expiresAt":1},"mcpOAuth":{"x":{"acc
 . "$ROOT/lib/core.sh"
 check "reads the first accessToken" "ours" "$(printf '%s' "$two" | cnt_json_str accessToken)"
 check "block reader scopes the key"  "ours" "$(printf '%s' "$two" | cnt_json_block claudeAiOauth | cnt_json_str accessToken)"
+# Blocks stay intact through nesting, braces in strings, and pretty printing.
+nested='{"five_hour":{"utilization":86.5,"meta":{"src":"x"},"resets_at":"2026-07-09T17:40:00Z"}}'
+blk=$(printf '%s' "$nested" | cnt_json_block five_hour)
+check "block spans nested object"   "86.5"                 "$(printf '%s' "$blk" | cnt_json_num utilization)"
+check "block keeps later keys"      "2026-07-09T17:40:00Z" "$(printf '%s' "$blk" | cnt_json_str resets_at)"
+check "block ignores braces in strings" "7" "$(printf '%s' '{"five_hour":{"note":"a{b}c","utilization":7}}' | cnt_json_block five_hour | cnt_json_num utilization)"
+pretty=$(printf '{\n "five_hour": {\n "utilization": 50.0,\n "resets_at": "2026-01-01T00:00:00Z"\n }\n}')
+check "block spans multiple lines" "50.0" "$(printf '%s' "$pretty" | cnt_json_block five_hour | cnt_json_num utilization)"
 
 echo "install:"
 # `curl | sh` must fetch the repo, never scoop up whatever the current directory
@@ -76,6 +84,33 @@ check "hostile prompt escaped"    '\"the\"'                        "$(dry 'sh ru
 if CONTINUUM_RESUME_CMD='nosuchagent {prompt}' sh "$ROOT/bin/continuum" resume 23:59 "$ROOT" x >/dev/null 2>&1
 then bad "missing agent fails" "exit 0"
 else ok  "missing agent fails"; fi
+
+echo "resume report:"
+# Fake resume log: one recent entry with ANSI/control junk, one ancient entry.
+# Started stamps go through date -d/-j, so format them portably.
+rr_dir="$TMP/rr"; mkdir -p "$rr_dir"
+fmt_epoch() { date -d "@$1" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -r "$1" '+%Y-%m-%d %H:%M:%S'; }
+recent=$(fmt_epoch "$(date +%s)")
+esc=$(printf '\033')
+{
+    printf '### %s - resumed in /tmp/proj\n' "$recent"
+    printf '%s[32mGreen task%s[0m done\n' "$esc" "$esc"
+    printf '%s]8;;http://evil\aLinked\n' "$esc"
+    printf '%s]8;;http://st-evil%s\\ ST-linked\n' "$esc" "$esc"
+    printf '%s]0;window title\atitled\n' "$esc"
+    printf '### end (exit 0) - /tmp/proj\n'
+    printf '### 2020-01-01 00:00:00 - resumed in /tmp/old\nancient-marker text\n### end (exit 1) - /tmp/old\n'
+} > "$rr_dir/continuum-resume.log"
+out=$(CLAUDE_CONFIG_DIR="$rr_dir" sh "$ROOT/hooks/resume-report.sh" 2>&1)
+check "resume report shows recent"     "Green task done" "$out"
+check "resume report keeps BEL link text" "Linked"    "$out"
+check "resume report keeps ST link text"  "ST-linked" "$out"
+check "resume report strips BEL titles" "titled"         "$out"
+case "$out" in *"$esc"*) bad "resume report strips escapes" "ESC leaked" ;; *) ok "resume report strips escapes" ;; esac
+case "$out" in *ancient-marker*) bad "resume report ignores old entries" "$out" ;; *) ok "resume report ignores old entries" ;; esac
+case "$out" in *http://evil*) bad "resume report strips URLs" "$out" ;; *) ok "resume report strips URLs" ;; esac
+out=$(CLAUDE_CONFIG_DIR="$TMP/rr_missing" sh "$ROOT/hooks/resume-report.sh" 2>&1)
+[ -z "$out" ] && ok "resume report silent without log" || bad "resume report silent without log" "$out"
 
 echo "watch:"
 check "watch fires over threshold" "resets at" "$(CONTINUUM_MOCK='91.0' sh "$ROOT/bin/continuum" watch 1 2>&1)"
@@ -104,6 +139,14 @@ check "tier 80 warns"          "80% tier" "$(esc 82.0)"
 check "tier 95 warns next"     "95% tier" "$(esc 96.0)"
 [ -z "$(esc 96.0)" ] && ok "same tier warns once" || bad "same tier warns once" "warned twice at 96%"
 check "tier 99 warns last"     "99% tier" "$(esc 99.0)"
+
+# Re-arm: a drop below the floor (top-up, rollover) clears the flag, so the
+# same tier fires again on the way back up instead of staying silent.
+rearm() { CONTINUUM_CACHE_MIN=0 CONTINUUM_MOCK="$1" hook rearm '{"session_id":"rearm"}'; }
+check "re-arm warns at 80" "80% tier" "$(rearm 82.0)"
+[ -z "$(rearm 46.0)" ] && ok "re-arm drop is silent" || bad "re-arm drop is silent" "warned at 46%"
+[ ! -f "$TMP/rearm/.continuum-warned-rearm" ] && ok "re-arm clears the flag" || bad "re-arm clears the flag" "flag still present"
+check "re-arm warns again at 80" "80% tier" "$(rearm 83.0)"
 
 # The "fires once per tier (...)" line reflects the configured tiers, not a hardcoded list.
 out=$(CONTINUUM_TIERS="50 75" CONTINUUM_THRESHOLD=50 CONTINUUM_MOCK="80.0" hook cti '{"session_id":"cti"}')
