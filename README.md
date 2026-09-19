@@ -126,6 +126,8 @@ Shows usage percentage in the Claude Code status bar: **green** (<80%), **yellow
 
 Plugin install copies the script automatically (the CLI installer enables it in `settings.json` too, creating the file if missing).
 
+Windows (PowerShell): use `hooks/statusline.ps1` as the `statusLine` command and `continuum.ps1 statusline` for the same config keys.
+
 Customize the format — tokens `{d%}` daily %, `{w%}` weekly %, `{dr}` daily reset, `{wr}` weekly reset:
 
 ```sh
@@ -202,7 +204,7 @@ Windows without Git Bash — override hooks in `settings.json`:
 ## Contributing
 
 ```
-sh tests/run.sh          # 68 tests, mock provider, no network
+sh tests/run.sh          # 84 tests, mock provider, no network
 pwsh tests/run.ps1       # same suite for PowerShell
 ```
 
