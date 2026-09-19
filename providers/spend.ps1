@@ -12,8 +12,13 @@ $ErrorActionPreference = 'Stop'
 $key = $env:ANTHROPIC_ADMIN_KEY
 if (-not $key) { throw 'ANTHROPIC_ADMIN_KEY not set' }
 
-$cap = 100
-if ($env:CONTINUUM_SPEND_CAP) { $cap = [double]$env:CONTINUUM_SPEND_CAP }
+$capRaw = '100'
+if ($env:CONTINUUM_SPEND_CAP) { $capRaw = $env:CONTINUUM_SPEND_CAP }
+# Mirror spend.sh: a non-numeric or non-positive cap must fail before any
+# network call (a zero cap would divide into Infinity).
+if ($capRaw -notmatch '^[0-9]*\.?[0-9]+$') { throw "invalid CONTINUUM_SPEND_CAP='$capRaw' (need a positive number)" }
+$cap = [double]$capRaw
+if (-not ($cap -gt 0)) { throw "invalid CONTINUUM_SPEND_CAP='$capRaw' (need a positive number)" }
 
 $now = Get-Date
 $start = $now.ToString('yyyy-MM-01')

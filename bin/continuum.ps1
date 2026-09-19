@@ -8,6 +8,8 @@
 #                                schedule `claude --continue` for after the reset
 #   continuum.ps1 history        show recent usage snapshots
 #   continuum.ps1 cleanup        remove stale flag/cache files (>24h old)
+#   continuum.ps1 statusline [key value | reset]
+#                                show or configure status-line format
 
 param(
     [Parameter(Position = 0)][string]$Command = 'status',
@@ -192,6 +194,69 @@ function Invoke-Cleanup {
     "Cleaned $cleaned stale files."
 }
 
+# Show or configure the status-line format (mirrors `continuum statusline`).
+# Shares .continuum-statusline.conf with hooks/statusline.ps1 and the sh hook.
+function Get-CntSlConfValue {
+    param([string]$Key, [string]$Default)
+    $conf = Join-Path $script:CntCfg '.continuum-statusline.conf'
+    if (Test-Path $conf) {
+        foreach ($line in (Get-Content -Path $conf)) {
+            if ($line.StartsWith("$Key=", [StringComparison]::Ordinal)) {
+                $v = $line.Substring($Key.Length + 1)
+                if ($v) { return $v }
+                return $Default
+            }
+        }
+    }
+    return $Default
+}
+
+function Set-CntSlConfValue {
+    param([string]$Key, [string]$Val)
+    $conf = Join-Path $script:CntCfg '.continuum-statusline.conf'
+    New-Item -ItemType Directory -Force -Path $script:CntCfg | Out-Null
+    $kept = @()
+    if (Test-Path $conf) {
+        $kept = @(Get-Content -Path $conf | Where-Object { -not $_.StartsWith("$Key=", [StringComparison]::Ordinal) })
+    }
+    Set-Content -Path $conf -Value ($kept + @("$Key=$Val"))
+}
+
+function Invoke-StatuslineConfig {
+    param([string]$Key, [string]$Val)
+    $conf = Join-Path $script:CntCfg '.continuum-statusline.conf'
+
+    if (-not $Key) {
+        "Status-line config ($conf):"
+        "  format        = $(Get-CntSlConfValue 'FORMAT' '{d%}% d {dr} | {w%}% w {wr}')"
+        "  format-single = $(Get-CntSlConfValue 'FORMAT_SINGLE' '{d%}% d {dr}')"
+        "  time          = $(Get-CntSlConfValue 'TIME_FORMAT' '%H:%M')"
+        "  date          = $(Get-CntSlConfValue 'DATE_FORMAT' '%d.%m')"
+        "  today         = $(Get-CntSlConfValue 'TODAY' 'today')"
+        ""
+        "Tokens: {d%} daily%, {w%} weekly%, {dr} daily reset, {wr} weekly reset"
+        return
+    }
+
+    if ($Key -eq 'reset') {
+        Remove-Item -Path $conf -Force -ErrorAction SilentlyContinue
+        'Status-line config reset to defaults.'
+        return
+    }
+
+    if (-not $Val) { throw 'continuum statusline: need a value' }
+
+    switch ($Key) {
+        'format'        { Set-CntSlConfValue 'FORMAT' $Val }
+        'format-single' { Set-CntSlConfValue 'FORMAT_SINGLE' $Val }
+        'time'          { Set-CntSlConfValue 'TIME_FORMAT' $Val }
+        'date'          { Set-CntSlConfValue 'DATE_FORMAT' $Val }
+        'today'         { Set-CntSlConfValue 'TODAY' $Val }
+        default         { throw "continuum statusline: unknown key '$Key'`n  keys: format, format-single, time, date, today" }
+    }
+    "Set $Key = $Val"
+}
+
 switch ($Command) {
     'status'    { Invoke-Status }
     'reset'     { Invoke-Reset }
@@ -201,5 +266,6 @@ switch ($Command) {
     'resume'    { Invoke-Resume $Arg1 $Arg2 $Arg3 }
     'history'   { Invoke-History }
     'cleanup'   { Invoke-Cleanup }
+    'statusline' { Invoke-StatuslineConfig $Arg1 $Arg2 }
     default     { [Console]::Error.WriteLine("continuum: unknown command '$Command'"); exit 1 }
 }
