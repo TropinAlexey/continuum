@@ -45,7 +45,9 @@ if ($env:CONTINUUM_CACHE_MIN) { $ttl = [int]$env:CONTINUUM_CACHE_MIN }
 $cacheKey = ($script:CntProvider -replace '[^A-Za-z0-9_,-]', '_')
 $cache  = Join-Path $script:CntCfg ".continuum-cache-$cacheKey"
 $failed = "$cache.fail"
-$fresh  = { param($f) (Test-Path $f) -and ((Get-Date) - (Get-Item $f).LastWriteTime).TotalMinutes -lt $ttl }
+# NB: Get-Item throws on dotfiles under macOS PowerShell (Test-Path on the
+# same path returns True), so read mtime via .NET which works everywhere.
+$fresh  = { param($f) (Test-Path $f) -and ((Get-Date) - [System.IO.File]::GetLastWriteTime($f)).TotalMinutes -lt $ttl }
 
 if (& $fresh $failed) { exit 0 }                # recently failed - do not retry yet
 

@@ -194,6 +194,7 @@ Remove-Item Env:CONTINUUM_CACHE_MIN
 
 Write-Host "wakelock:"
 $env:CLAUDE_CONFIG_DIR = Join-Path $tmp 'wl'
+New-Item -ItemType Directory -Force -Path $env:CLAUDE_CONFIG_DIR | Out-Null
 . (Join-Path $root 'lib/core.ps1')
 # No cnt_wakelock_wrap equivalent here: Start-Job/caffeinate/systemd-inhibit
 # cover the same sleeps, so test start/stop directly.

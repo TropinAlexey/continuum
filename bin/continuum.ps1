@@ -186,7 +186,9 @@ function Invoke-Cleanup {
     $cleaned = 0
     $cutoff = (Get-Date).AddHours(-24)
     foreach ($pattern in @('.continuum-warned-*', '.continuum-warned7d-*', '.continuum-cache-*', '.continuum-wakelock-*')) {
-        Get-ChildItem -Path $script:CntCfg -Filter $pattern -ErrorAction SilentlyContinue |
+        # NB: -Force is load-bearing - without it the provider skips dotfiles
+        # on some platforms (macOS) and cleanup would silently clean nothing.
+        Get-ChildItem -Path $script:CntCfg -Force -Filter $pattern -ErrorAction SilentlyContinue |
             Where-Object { $_.LastWriteTime -lt $cutoff } | ForEach-Object {
                 Remove-Item $_.FullName -Force; $cleaned++
             }

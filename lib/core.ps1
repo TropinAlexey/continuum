@@ -143,16 +143,30 @@ function Start-CntWakeLock {
             Start-Sleep -Seconds $dur
             [WakeLock]::SetThreadExecutionState(0x80000000) | Out-Null  # ES_CONTINUOUS (clear)
         } -ArgumentList $Seconds
-        Set-Content -Path $pidFile -Value "job:$($job.Id)" -NoNewline
+        # A missing config dir must not leave an orphaned job behind.
+        try { Set-Content -Path $pidFile -Value "job:$($job.Id)" -NoNewline -ErrorAction Stop }
+        catch {
+            Stop-Job -Job $job -ErrorAction SilentlyContinue
+            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+            return ''
+        }
     } elseif ($IsMacOS) {
-        $p = Start-Process -FilePath 'caffeinate' -ArgumentList '-i', '-t', $Seconds -PassThru -WindowStyle Hidden 2>$null
-        if ($p) { Set-Content -Path $pidFile -Value $p.Id -NoNewline }
+        # NB: no -WindowStyle here: Start-Process on Unix PowerShell does not
+        # support it and throws, which would disable the wakelock entirely.
+        $p = Start-Process -FilePath 'caffeinate' -ArgumentList '-i', '-t', $Seconds -PassThru 2>$null
+        if ($p) {
+            try { Set-Content -Path $pidFile -Value $p.Id -NoNewline -ErrorAction Stop }
+            catch { Stop-Process -InputObject $p -ErrorAction SilentlyContinue; return '' }
+        }
         else { return '' }
     } elseif ($IsLinux -and (Get-Command systemd-inhibit -ErrorAction SilentlyContinue)) {
         $p = Start-Process -FilePath 'systemd-inhibit' `
             -ArgumentList '--what=idle:sleep','--who=continuum','--why=resume','sleep',$Seconds `
-            -PassThru -WindowStyle Hidden 2>$null
-        if ($p) { Set-Content -Path $pidFile -Value $p.Id -NoNewline }
+            -PassThru 2>$null
+        if ($p) {
+            try { Set-Content -Path $pidFile -Value $p.Id -NoNewline -ErrorAction Stop }
+            catch { Stop-Process -InputObject $p -ErrorAction SilentlyContinue; return '' }
+        }
         else { return '' }
     } else { return '' }
     return $pidFile
