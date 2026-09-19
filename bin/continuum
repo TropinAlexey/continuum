@@ -39,6 +39,12 @@ label() {  # pretty names for the windows a provider reports
     esac
 }
 
+# sq <string> -> the string with single quotes escaped for embedding as
+# '<value>' inside a generated shell fragment (plist, systemd unit, daemon
+# wrapper). Without this a project dir like /tmp/o'brien breaks out of the
+# quoting and injects shell. Call at schedule time, embed the result.
+sq() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
+
 # Capture before piping: `cnt_read | while` would hide the provider's exit status
 # behind the loop's, and a caller checking `continuum status` would see success.
 cmd_status() {
@@ -85,6 +91,9 @@ cmd_resume() {
 
     [ -d "$DIR" ] || { echo "no such directory: $DIR" >&2; exit 1; }
 
+    # Escaped copies for generated shell fragments (see sq above).
+    sq_dir=$(sq "$DIR"); sq_log=$(sq "$LOG")
+
     # Substitute {prompt} with awk's index/substr: no globbing, no sed delimiters to
     # collide with, no eval. The prompt lands inside double quotes in the template, so
     # neutralise the characters the shell would still interpret there.
@@ -104,7 +113,7 @@ cmd_resume() {
         return 0
     fi
 
-    agent=${CNT_RESUME_CMD%% *}
+    agent=$(printf '%s' "$CNT_RESUME_CMD" | sed 's/^ *//'); agent=${agent%% *}
     command -v "$agent" >/dev/null 2>&1 || { echo "\`$agent\` not found in PATH" >&2; exit 1; }
 
     mkdir -p "$CNT_CFG" 2>/dev/null || true
@@ -155,7 +164,7 @@ cmd_resume() {
     <string>-i</string>
     <string>sh</string>
     <string>-c</string>
-    <string>cd '${DIR}' &amp;&amp; printf '\n### %s - resumed in %s\n\n' "\$(date '+%Y-%m-%d %H:%M:%S')" '${DIR}' &gt;&gt; '${LOG}' &amp;&amp; ${escaped_cmd} &gt;&gt; '${LOG}' 2&gt;&amp;1; s=\$?; printf '\n### end (exit %s) - %s\n' "\$s" '${DIR}' &gt;&gt; '${LOG}'; word=finished; [ "\$s" -eq 0 ] || word="FAILED (exit \$s)"; osascript -e "display notification \"\$(basename '${DIR}')\" with title \"continuum resume \$word\"" 2&gt;/dev/null || true; ${wl_cleanup}launchctl remove '${label}' 2&gt;/dev/null; rm -f '${plist}'</string>
+    <string>cd '${sq_dir}' &amp;&amp; printf '\n### %s - resumed in %s\n\n' "\$(date '+%Y-%m-%d %H:%M:%S')" '${sq_dir}' &gt;&gt; '${sq_log}' &amp;&amp; ${escaped_cmd} &gt;&gt; '${sq_log}' 2&gt;&amp;1; s=\$?; printf '\n### end (exit %s) - %s\n' "\$s" '${sq_dir}' &gt;&gt; '${sq_log}'; word=finished; [ "\$s" -eq 0 ] || word="FAILED (exit \$s)"; osascript -e "display notification \"\$(basename '${sq_dir}')\" with title \"continuum resume \$word\"" 2&gt;/dev/null || true; ${wl_cleanup}launchctl remove '${label}' 2&gt;/dev/null; rm -f '${plist}'</string>
   </array>
   <key>StartCalendarInterval</key><dict>
     <key>Hour</key><integer>$(date -r "$fire_epoch" +%H | sed 's/^0//')</integer>
@@ -178,8 +187,7 @@ PLIST
         fi
     elif [ "$(uname)" = "FreeBSD" ] && command -v daemon >/dev/null 2>&1; then
         # FreeBSD daemon(8) — detaches cleanly, survives logout but not reboot.
-        daemon_log="$LOG"
-        wrapper_script="sleep ${delay} && cd '${DIR}' && printf '\n### %s - resumed in %s\n\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" '${DIR}' >> '${daemon_log}' && ${cmd} >> '${daemon_log}' 2>&1; s=\$?; printf '\n### end (exit %s) - %s\n' \"\$s\" '${DIR}' >> '${daemon_log}'"
+        wrapper_script="sleep ${delay} && cd '${sq_dir}' && printf '\n### %s - resumed in %s\n\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" '${sq_dir}' >> '${sq_log}' && ${cmd} >> '${sq_log}' 2>&1; s=\$?; printf '\n### end (exit %s) - %s\n' \"\$s\" '${sq_dir}' >> '${sq_log}'"
         daemon -p "$CNT_CFG/.continuum-daemon.pid" sh -c "$wrapper_script"
         pid=$(cat "$CNT_CFG/.continuum-daemon.pid" 2>/dev/null || echo "?")
         scheduled=true
@@ -191,7 +199,7 @@ PLIST
         # systemd-inhibit wraps the task to prevent sleep during execution
         inhibit_prefix=""
         command -v systemd-inhibit >/dev/null 2>&1 && inhibit_prefix="systemd-inhibit --what=idle:sleep --who=continuum --why=resume"
-        wrapper_script="cd '${DIR}' && printf '\n### %s - resumed in %s\n\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" '${DIR}' >> '${LOG}' && ${inhibit_prefix:+$inhibit_prefix} ${cmd} >> '${LOG}' 2>&1; s=\$?; printf '\n### end (exit %s) - %s\n' \"\$s\" '${DIR}' >> '${LOG}'; notify-send 'continuum resume finished (exit '\"\$s\"')' '${DIR}' 2>/dev/null || true"
+        wrapper_script="cd '${sq_dir}' && printf '\n### %s - resumed in %s\n\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" '${sq_dir}' >> '${sq_log}' && ${inhibit_prefix:+$inhibit_prefix} ${cmd} >> '${sq_log}' 2>&1; s=\$?; printf '\n### end (exit %s) - %s\n' \"\$s\" '${sq_dir}' >> '${sq_log}'; notify-send 'continuum resume finished (exit '\"\$s\"')' '${sq_dir}' 2>/dev/null || true"
         if systemd-run --user --unit="$unit" --on-active="${delay}s" --description="continuum resume" sh -c "$wrapper_script" 2>/dev/null; then
             scheduled=true
             printf 'Resuming in %s min (at %s) in %s: "%s"\n' "$(( delay / 60 ))" "$T" "$DIR" "$PROMPT"

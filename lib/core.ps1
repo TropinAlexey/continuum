@@ -22,11 +22,14 @@ if ($env:CLAUDE_PLUGIN_ROOT) { $script:CntRoot = $env:CLAUDE_PLUGIN_ROOT }
 else { $script:CntRoot = Split-Path -Parent $PSScriptRoot }
 
 function Get-CntProviders {
-    foreach ($d in @((Join-Path $script:CntRoot 'providers'), (Join-Path $script:CntCfg 'providers'))) {
+    # NB: collect first, sort after - a pipeline directly on the function
+    # body (`} | Sort-Object`) is a parse error in PowerShell.
+    $all = foreach ($d in @((Join-Path $script:CntRoot 'providers'), (Join-Path $script:CntCfg 'providers'))) {
         if (Test-Path $d) {
             Get-ChildItem -Path $d -Filter '*.ps1' | ForEach-Object { $_.BaseName }
         }
     }
+    $all | Sort-Object -Unique
 }
 
 function Get-CntProviderPath {
@@ -61,11 +64,16 @@ function Read-CntUsage {
     $provs = $script:CntProvider -split ','
     $bestUtil = 0; $bestLine = ''; $rest = @()
     foreach ($prov in $provs) {
+        $prov = $prov.Trim()
+        if (-not $prov) { continue }
         try {
-            $lines = @(Read-CntUsageSingle $prov.Trim())
+            $lines = @(Read-CntUsageSingle $prov)
         } catch { continue }
         $f = $lines[0].Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
-        $u = [int][math]::Floor([double]::Parse($f[1], [cultureinfo]::InvariantCulture))
+        # A custom provider returning garbage must not throw: treat as zero
+        # so a healthy provider still wins instead of failing the whole read.
+        $u = 0
+        try { $u = [double]::Parse($f[1], [cultureinfo]::InvariantCulture) } catch { $u = 0 }
         if ($u -gt $bestUtil) { $bestUtil = $u; $bestLine = $lines[0] }
         if ($lines.Count -gt 1) { $rest += $lines[1..($lines.Count - 1)] }
     }
@@ -135,16 +143,30 @@ function Start-CntWakeLock {
             Start-Sleep -Seconds $dur
             [WakeLock]::SetThreadExecutionState(0x80000000) | Out-Null  # ES_CONTINUOUS (clear)
         } -ArgumentList $Seconds
-        Set-Content -Path $pidFile -Value "job:$($job.Id)" -NoNewline
+        # A missing config dir must not leave an orphaned job behind.
+        try { Set-Content -Path $pidFile -Value "job:$($job.Id)" -NoNewline -ErrorAction Stop }
+        catch {
+            Stop-Job -Job $job -ErrorAction SilentlyContinue
+            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+            return ''
+        }
     } elseif ($IsMacOS) {
-        $p = Start-Process -FilePath 'caffeinate' -ArgumentList '-i', '-t', $Seconds -PassThru -WindowStyle Hidden 2>$null
-        if ($p) { Set-Content -Path $pidFile -Value $p.Id -NoNewline }
+        # NB: no -WindowStyle here: Start-Process on Unix PowerShell does not
+        # support it and throws, which would disable the wakelock entirely.
+        $p = Start-Process -FilePath 'caffeinate' -ArgumentList '-i', '-t', $Seconds -PassThru 2>$null
+        if ($p) {
+            try { Set-Content -Path $pidFile -Value $p.Id -NoNewline -ErrorAction Stop }
+            catch { Stop-Process -InputObject $p -ErrorAction SilentlyContinue; return '' }
+        }
         else { return '' }
     } elseif ($IsLinux -and (Get-Command systemd-inhibit -ErrorAction SilentlyContinue)) {
         $p = Start-Process -FilePath 'systemd-inhibit' `
             -ArgumentList '--what=idle:sleep','--who=continuum','--why=resume','sleep',$Seconds `
-            -PassThru -WindowStyle Hidden 2>$null
-        if ($p) { Set-Content -Path $pidFile -Value $p.Id -NoNewline }
+            -PassThru 2>$null
+        if ($p) {
+            try { Set-Content -Path $pidFile -Value $p.Id -NoNewline -ErrorAction Stop }
+            catch { Stop-Process -InputObject $p -ErrorAction SilentlyContinue; return '' }
+        }
         else { return '' }
     } else { return '' }
     return $pidFile

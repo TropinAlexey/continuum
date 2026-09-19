@@ -22,6 +22,14 @@ case "$event" in *'"stop_hook_active":true'*) exit 0 ;; esac
 
 sid=$(printf '%s' "$event" | cnt_json_str session_id)
 [ -z "$sid" ] && sid=unknown
+# session_id lands in a filename: allowlist it to close path traversal
+# (a hostile or corrupt event with session_id "../../x" must stay in-dir).
+case "$sid" in
+    *[!A-Za-z0-9_-]*)
+        sid=$(printf '%s' "$sid" | tr -c 'A-Za-z0-9_-' '_')
+        [ -z "$sid" ] && sid=unknown
+        ;;
+esac
 
 # A Stop hook that exits non-zero spams the user, so never let a missing dir fail us.
 mkdir -p "$CNT_CFG" 2>/dev/null || exit 0
@@ -34,7 +42,10 @@ case "$warned" in ''|*[!0-9]*) warned=0 ;; esac
 
 # The hook runs after every turn, but providers hit rate-limited endpoints, so cache
 # aggressively and back off after a failure ("negative cache").
-cache="$CNT_CFG/.continuum-cache-$CNT_PROVIDER"
+# The cache key is derived from the provider list, so sanitize it: a value like
+# CONTINUUM_PROVIDER='../../x' must not escape the config dir.
+cache_key=$(printf '%s' "$CNT_PROVIDER" | tr -c 'A-Za-z0-9_,-' '_')
+cache="$CNT_CFG/.continuum-cache-$cache_key"
 failed="$cache.fail"
 ttl="${CONTINUUM_CACHE_MIN:-10}"
 
@@ -122,11 +133,11 @@ rest=$(printf '%s\n' "$lines" | awk 'NR>1 {printf "%s window %s%%, ", $1, $2}' |
 # Build reason message depending on which windows triggered.
 reason=""
 if [ "$primary_new" = true ]; then
-    printf '%s' "$tier" > "$flag"
+    printf '%s' "$tier" > "$flag.tmp" && mv "$flag.tmp" "$flag"
     reason="[continuum] The primary usage window is ${util_i}% used (crossed the ${tier}% tier)${when:+, resets at ${when}}"
 fi
 if [ "$weekly_new" = true ]; then
-    printf '%s' "$tier7" > "$flag7"
+    printf '%s' "$tier7" > "$flag7.tmp" && mv "$flag7.tmp" "$flag7"
     if [ -n "$reason" ]; then
         reason="${reason}. The weekly window also crossed the ${tier7}% tier (${util7_i}% used)"
     else
@@ -144,6 +155,10 @@ if [ "$weekly_new" = true ]; then
     reason="${reason} Weekly tiers fire once each (${tiers7})."
 fi
 
+# The provider controls window labels, which end up inside `reason`, which ends up
+# inside a JSON string. Escape it: an unescaped quote would emit invalid JSON.
+esc_reason=$(printf '%s' "$reason" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\n\r')
+
 cat <<EOF
-{"decision":"block","reason":"${reason}"}
+{"decision":"block","reason":"${esc_reason}"}
 EOF
