@@ -56,7 +56,7 @@ When utilization crosses a threshold, Claude stops and asks:
 
 > *Window is 86% full, resets at 21:40. What do we do?*
 
-Options include: wrap up, finish the current batch, save & auto-resume, frugal mode (blocks subagents), cheap tasks only, or ignore. Asks in your language. Tiered warnings — **80% → 90% → 95% → 99%** — each fires once. Weekly window tracked separately (**70% → 85% → 95%**).
+Options include: wrap up, finish the current batch, save & auto-resume, frugal mode (blocks subagents), cheap tasks only, or ignore. Asks in your language. Tiered warnings — **80% → 90% → 95% → 99%** — each fires once. Weekly window tracked separately (**70% → 85% → 95%**). If usage drops back below the threshold (limit top-up or window rollover), tiers re-arm and fire again on the way up.
 
 Choose "save and continue" → commits, schedules `claude --continue` for after reset, gives you the PID. Close your laptop. Session resumes without you.
 
@@ -71,6 +71,7 @@ continuum watch       # poll in a spare pane; bell at threshold
 continuum history     # last 20 usage snapshots
 continuum cleanup     # remove stale flag/cache files (>24h old)
 continuum providers   # anthropic, mock, spend
+continuum statusline  # show status-line format config
 
 continuum resume "$(continuum reset)" "$PWD" "finish the DocumentService tests"
 ```
@@ -123,7 +124,19 @@ Shows usage percentage in the Claude Code status bar: **green** (<80%), **yellow
 }
 ```
 
-Plugin install copies the script automatically.
+Plugin install copies the script automatically (the CLI installer enables it in `settings.json` too, creating the file if missing).
+
+Customize the format — tokens `{d%}` daily %, `{w%}` weekly %, `{dr}` daily reset, `{wr}` weekly reset:
+
+```sh
+continuum statusline                    # show current config
+continuum statusline format "{d%}% d {dr} | {w%}% w {wr}"
+continuum statusline format-single "{d%}% d {dr}"   # shown when only one window exists
+continuum statusline time "%H:%M"       # reset time format
+continuum statusline date "%d.%m"       # reset date format (when not today)
+continuum statusline today "today"      # word for same-day resets
+continuum statusline reset              # back to defaults
+```
 
 ## Providers
 
@@ -131,7 +144,7 @@ continuum is provider-agnostic — it asks "how much is used, when does it reset
 
 A provider is a script that prints: `5h 86.5 1783000000` — that's the entire interface. Write your own in 10 minutes: [docs/writing-a-provider.md](docs/writing-a-provider.md).
 
-**Multiple providers:** `CONTINUUM_PROVIDER=anthropic,spend` — runs both, takes the highest utilization.
+**Multiple providers:** `CONTINUUM_PROVIDER=anthropic,spend` — runs both, takes the highest utilization (spaces around the comma are fine).
 
 ## Platforms
 
@@ -170,8 +183,9 @@ Windows without Git Bash — override hooks in `settings.json`:
 | `CONTINUUM_OFF` | — | Disable the Stop hook. |
 | `CONTINUUM_FRUGAL` | — | `1` = frugal mode: blocks Agent calls. |
 | `CONTINUUM_CACHE_MIN` | `10` | Cache duration (minutes). `0` disables. |
-| `CONTINUUM_SPEND_CAP` | `100` | Monthly budget ($) for the `spend` provider. |
+| `CONTINUUM_SPEND_CAP` | `100` | Monthly budget ($) for the `spend` provider. Must be a positive number. |
 | `ANTHROPIC_ADMIN_KEY` | — | Admin API key for the `spend` provider. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | — | OAuth token for the `anthropic` provider. Fallback when Keychain / `~/.claude/.credentials.json` have nothing usable. |
 
 ## Troubleshooting
 
@@ -188,7 +202,7 @@ Windows without Git Bash — override hooks in `settings.json`:
 ## Contributing
 
 ```
-sh tests/run.sh          # 55 tests, mock provider, no network
+sh tests/run.sh          # 68 tests, mock provider, no network
 pwsh tests/run.ps1       # same suite for PowerShell
 ```
 

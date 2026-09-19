@@ -5,7 +5,7 @@
 <h1 align="center">continuum</h1>
 
 <p align="center">
-  <b><a href="README.md">🇷🇺 English </a></b>  | <b>🇷🇺 Русский</b>
+  <b><a href="README.md">🇬🇧 English</a></b>  | <b>🇷🇺 Русский</b>
 </p>
 
 <p align="center">
@@ -56,7 +56,7 @@ irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | 
 
 > *Окно заполнено на 86%, сбрасывается в 21:40. Что делаем?*
 
-Варианты: свернуться, доделать текущий пакет, сохранить и авто-resume, экономный режим (блокирует субагентов), только дешёвые задачи, или проигнорировать. Спрашивает на твоём языке. Предупреждения ступенчатые — **80% → 90% → 95% → 99%** — каждый уровень срабатывает один раз. Недельное окно отдельно (**70% → 85% → 95%**).
+Варианты: свернуться, доделать текущий пакет, сохранить и авто-resume, экономный режим (блокирует субагентов), только дешёвые задачи, или проигнорировать. Спрашивает на твоём языке. Предупреждения ступенчатые — **80% → 90% → 95% → 99%** — каждый уровень срабатывает один раз. Недельное окно отдельно (**70% → 85% → 95%**). Если использование упало обратно ниже порога (докупка лимита или переворот окна), уровни взводятся заново и сработают снова на росте.
 
 Выбрал «сохранить и продолжить» → коммитит, планирует `claude --continue` на после сброса, отдаёт PID. Закрываешь ноутбук. Сессия продолжает без тебя.
 
@@ -71,6 +71,7 @@ continuum watch       # поллинг в отдельной панели; зв�
 continuum history     # последние 20 снапшотов
 continuum cleanup     # удалить устаревшие файлы (>24ч)
 continuum providers   # anthropic, mock, spend
+continuum statusline  # показать конфиг статуслайна
 
 continuum resume "$(continuum reset)" "$PWD" "доделать тесты DocumentService"
 ```
@@ -100,53 +101,13 @@ Claude Code запускает `Stop`-хук после каждого хода.
 
 `continuum resume` выбирает лучший планировщик и предотвращает засыпание системы:
 
-ОС
-
-Планировщик
-
-Переживает ребут
-
-Wakelock
-
-macOS
-
-`launchd`
-
-да
-
-`caffeinate -i`
-
-Linux
-
-`systemd-run --user`
-
-да
-
-`systemd-inhibit`
-
-FreeBSD
-
-`daemon(8)`
-
-только logout
-
-—
-
-Windows
-
-detached process
-
-нет
-
-`SetThreadExecutionState`
-
-Fallback
-
-`nohup sleep`
-
-нет
-
-лучший доступный
+| OS | Планировщик | Переживает ребут | Wakelock |
+|---|---|---|---|
+| macOS | `launchd` | да | `caffeinate -i` |
+| Linux | `systemd-run --user` | да | `systemd-inhibit` |
+| FreeBSD | `daemon(8)` | только logout | — |
+| Windows | detached process | нет | `SetThreadExecutionState` |
+| Fallback | `nohup sleep` | нет | лучший доступный |
 
 Лог: `~/.claude/continuum-resume.log` — маркеры `### resumed in DIR` / `### end (exit N)`. Десктопное уведомление по завершению (`osascript` / `notify-send`).
 
@@ -158,12 +119,24 @@ Fallback
 {
   "statusLine": {
     "type": "command",
-    "command": "sh "$HOME/.claude/hooks/statusline.sh""
+    "command": "sh \"$HOME/.claude/hooks/statusline.sh\""
   }
 }
 ```
 
-При установке плагина скрипт копируется автоматически.
+При установке плагина скрипт копируется автоматически (CLI-инсталлятор тоже включает его в `settings.json`, создавая файл если его нет).
+
+Настройка формата — токены `{d%}` дневной %, `{w%}` недельный %, `{dr}` сброс дневного, `{wr}` сброс недельного:
+
+```sh
+continuum statusline                    # показать текущий конфиг
+continuum statusline format "{d%}% d {dr} | {w%}% w {wr}"
+continuum statusline format-single "{d%}% d {dr}"   # когда окно только одно
+continuum statusline time "%H:%M"       # формат времени сброса
+continuum statusline date "%d.%m"       # формат даты сброса (когда не сегодня)
+continuum statusline today "today"      # слово для сегодняшнего сброса
+continuum statusline reset              # вернуть defaults
+```
 
 ## Провайдеры
 
@@ -171,7 +144,7 @@ continuum провайдер-агностичен — спрашивает «с�
 
 Провайдер — скрипт, который печатает: `5h 86.5 1783000000` — вот и весь интерфейс. Написать свой за 10 минут: [docs/writing-a-provider.md](docs/writing-a-provider.md).
 
-**Несколько провайдеров:** `CONTINUUM_PROVIDER=anthropic,spend` — запускает оба, берёт максимальную утилизацию.
+**Несколько провайдеров:** `CONTINUUM_PROVIDER=anthropic,spend` — запускает оба, берёт максимальную утилизацию (пробелы вокруг запятой допустимы).
 
 ## Платформы
 
@@ -198,83 +171,21 @@ Windows без Git Bash — переопредели хуки в `settings.json`
 
 ## Настройка
 
-Переменная
-
-По умолчанию
-
-Что делает
-
-`CONTINUUM_THRESHOLD`
-
-`80`
-
-Порог основного окна (%).
-
-`CONTINUUM_TIERS`
-
-`80 90 95 99`
-
-Уровни основного окна. Каждый — один раз.
-
-`CONTINUUM_THRESHOLD_7D`
-
-`70`
-
-Порог недельного окна.
-
-`CONTINUUM_TIERS_7D`
-
-`70 85 95`
-
-Уровни недельного окна.
-
-`CONTINUUM_PROVIDER`
-
-`anthropic`
-
-Провайдер(ы), через запятую.
-
-`CONTINUUM_RESUME_CMD`
-
-`claude --continue …`
-
-Команда агента для `resume`. `{prompt}` = задача.
-
-`CONTINUUM_DRY_RUN`
-
-—
-
-`resume` печатает вместо планирования.
-
-`CONTINUUM_OFF`
-
-—
-
-Отключить Stop-хук.
-
-`CONTINUUM_FRUGAL`
-
-—
-
-`1` = экономный режим: блокирует Agent.
-
-`CONTINUUM_CACHE_MIN`
-
-`10`
-
-Время кэша (минуты). `0` отключает.
-
-`CONTINUUM_SPEND_CAP`
-
-`100`
-
-Месячный бюджет ($) для провайдера `spend`.
-
-`ANTHROPIC_ADMIN_KEY`
-
-—
-
-Admin API ключ для провайдера `spend`.
+| Переменная | По умолчанию | Что делает |
+|---|---|---|
+| `CONTINUUM_THRESHOLD` | `80` | Порог основного окна (%). |
+| `CONTINUUM_TIERS` | `80 90 95 99` | Уровни основного окна. Каждый — один раз. |
+| `CONTINUUM_THRESHOLD_7D` | `70` | Порог недельного окна. |
+| `CONTINUUM_TIERS_7D` | `70 85 95` | Уровни недельного окна. |
+| `CONTINUUM_PROVIDER` | `anthropic` | Провайдер(ы), через запятую. |
+| `CONTINUUM_RESUME_CMD` | `claude --continue …` | Команда агента для `resume`. `{prompt}` = задача. |
+| `CONTINUUM_DRY_RUN` | — | `resume` печатает вместо планирования. |
+| `CONTINUUM_OFF` | — | Отключить Stop-хук. |
+| `CONTINUUM_FRUGAL` | — | `1` = экономный режим: блокирует Agent. |
+| `CONTINUUM_CACHE_MIN` | `10` | Время кэша (минуты). `0` отключает. |
+| `CONTINUUM_SPEND_CAP` | `100` | Месячный бюджет ($) для провайдера `spend`. Должно быть положительным числом. |
+| `ANTHROPIC_ADMIN_KEY` | — | Admin API ключ для провайдера `spend`. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | — | OAuth-токен для провайдера `anthropic`. Запасной вариант, когда в Keychain / `~/.claude/.credentials.json` ничего usable нет. |
 
 ## Troubleshooting
 
@@ -291,7 +202,7 @@ Admin API ключ для провайдера `spend`.
 ## Участие
 
 ```
-sh tests/run.sh          # 55 тестов, mock-провайдер, без сети
+sh tests/run.sh          # 68 тестов, mock-провайдер, без сети
 pwsh tests/run.ps1       # тот же набор для PowerShell
 ```
 
