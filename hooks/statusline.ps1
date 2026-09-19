@@ -117,11 +117,12 @@ $dateFmt   = Get-SlConf 'DATE_FORMAT' '%d.%m'
 $todayWord = Get-SlConf 'TODAY' 'today'
 
 $esc = [char]27
-$dColored = "$esc[$(Get-SlColor $dPct)m$dPct%$esc[0m"
+# NB: ${esc}, not $esc - "$esc[" would parse as an indexer into $esc.
+$dColored = "${esc}[$(Get-SlColor $dPct)m${dPct}%${esc}[0m"
 $dResetStr = Format-SlReset $dReset
 
 if ($null -ne $wPct) {
-    $wColored = "$esc[$(Get-SlColor $wPct)m$wPct%$esc[0m"
+    $wColored = "${esc}[$(Get-SlColor $wPct)m${wPct}%${esc}[0m"
     $wResetStr = Format-SlReset $wReset
     $out = $fmt
     $out = Invoke-SlSub $out '{w%}' $wColored

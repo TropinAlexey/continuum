@@ -22,12 +22,15 @@ if ($env:CLAUDE_PLUGIN_ROOT) { $script:CntRoot = $env:CLAUDE_PLUGIN_ROOT }
 else { $script:CntRoot = Split-Path -Parent $PSScriptRoot }
 
 function Get-CntProviders {
-    foreach ($d in @((Join-Path $script:CntRoot 'providers'), (Join-Path $script:CntCfg 'providers'))) {
+    # NB: collect first, sort after - a pipeline directly on the function
+    # body (`} | Sort-Object`) is a parse error in PowerShell.
+    $all = foreach ($d in @((Join-Path $script:CntRoot 'providers'), (Join-Path $script:CntCfg 'providers'))) {
         if (Test-Path $d) {
             Get-ChildItem -Path $d -Filter '*.ps1' | ForEach-Object { $_.BaseName }
         }
     }
-} | Sort-Object -Unique
+    $all | Sort-Object -Unique
+}
 
 function Get-CntProviderPath {
     param([string]$Name)
