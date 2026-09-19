@@ -7,14 +7,19 @@ set -eu
 CNT_CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 CNT_PROVIDER="${CONTINUUM_PROVIDER:-anthropic}"
 case "$CNT_PROVIDER" in *,*) CNT_PROVIDER="${CNT_PROVIDER%%,*}" ;; esac
+# The provider name lands in a filename: keep it in-dir on hostile values.
+CNT_PROVIDER=$(printf '%s' "$CNT_PROVIDER" | tr -d '[:space:]' | tr -c 'A-Za-z0-9_-' '_')
+[ -z "$CNT_PROVIDER" ] && CNT_PROVIDER=anthropic
 
 cache="$CNT_CFG/.continuum-cache-$CNT_PROVIDER"
 conf="$CNT_CFG/.continuum-statusline.conf"
 
-# Background refresh if cache is older than 30s; atomic write via tmp+mv
+# Background refresh if cache is older than 30s; atomic write via tmp+mv.
+# The tmp file carries the PID: two sessions refreshing at once must not share it.
 LIB="${CLAUDE_PLUGIN_ROOT:-$CNT_CFG}/lib/core.sh"
 if [ -f "$LIB" ] && { [ ! -f "$cache" ] || [ -z "$(find "$cache" -mmin -0.5 2>/dev/null)" ]; }; then
-    (CNT_ROOT="${CLAUDE_PLUGIN_ROOT:-$CNT_CFG}" . "$LIB" && cnt_read > "$cache.tmp" 2>/dev/null && mv "$cache.tmp" "$cache") &
+    _tmp="$cache.$$.tmp"
+    (CNT_ROOT="${CLAUDE_PLUGIN_ROOT:-$CNT_CFG}" . "$LIB" && cnt_read > "$_tmp" 2>/dev/null && mv "$_tmp" "$cache" || rm -f "$_tmp") &
 fi
 
 [ -f "$cache" ] || exit 0

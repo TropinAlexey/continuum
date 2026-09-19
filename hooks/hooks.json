@@ -19,8 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/continuum-check.sh\"",
-            "shell": "bash"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/continuum-check.sh\""
           }
         ]
       }
@@ -30,8 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/frugal-gate.sh\"",
-            "shell": "bash"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/frugal-gate.sh\""
           }
         ]
       }

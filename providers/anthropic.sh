@@ -38,6 +38,10 @@ _token() {
 }
 
 tok=$(_token) || { echo "no OAuth token found - are you logged in to Claude Code?" >&2; exit 1; }
+# _token can print nothing but still exit 0 when the store parses to empty
+# (Keychain holding a non-JSON value, credentials file without our key).
+# An empty Bearer would just 401 below - fail fast with the helpful message.
+[ -n "$tok" ] || { echo "no OAuth token found - are you logged in to Claude Code?" >&2; exit 1; }
 
 json=$(curl -fsS -m 15 -H "Authorization: Bearer $tok" \
             -H "anthropic-beta: oauth-2025-04-20" "$USAGE_URL" 2>/dev/null) || {

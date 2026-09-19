@@ -27,7 +27,7 @@ function Get-CntProviders {
             Get-ChildItem -Path $d -Filter '*.ps1' | ForEach-Object { $_.BaseName }
         }
     }
-}
+} | Sort-Object -Unique
 
 function Get-CntProviderPath {
     param([string]$Name)
@@ -61,11 +61,16 @@ function Read-CntUsage {
     $provs = $script:CntProvider -split ','
     $bestUtil = 0; $bestLine = ''; $rest = @()
     foreach ($prov in $provs) {
+        $prov = $prov.Trim()
+        if (-not $prov) { continue }
         try {
-            $lines = @(Read-CntUsageSingle $prov.Trim())
+            $lines = @(Read-CntUsageSingle $prov)
         } catch { continue }
         $f = $lines[0].Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
-        $u = [int][math]::Floor([double]::Parse($f[1], [cultureinfo]::InvariantCulture))
+        # A custom provider returning garbage must not throw: treat as zero
+        # so a healthy provider still wins instead of failing the whole read.
+        $u = 0
+        try { $u = [double]::Parse($f[1], [cultureinfo]::InvariantCulture) } catch { $u = 0 }
         if ($u -gt $bestUtil) { $bestUtil = $u; $bestLine = $lines[0] }
         if ($lines.Count -gt 1) { $rest += $lines[1..($lines.Count - 1)] }
     }

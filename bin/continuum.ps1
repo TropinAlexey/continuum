@@ -45,7 +45,7 @@ function Invoke-Status {
     $hist = Join-Path $script:CntCfg '.continuum-history.log'
     New-Item -ItemType Directory -Force -Path $script:CntCfg 2>$null | Out-Null
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm'
-    $summary = ($allLines | ForEach-Object { $p = $_.Split(' '); "$($p[0]):$($p[1])%" }) -join ' '
+    $summary = ($allLines | ForEach-Object { $p = $_.Split(' ', [StringSplitOptions]::RemoveEmptyEntries); "$($p[0]):$($p[1])%" }) -join ' '
     try { Add-Content -Path $hist -Value "$ts  $summary" } catch {}
 }
 
@@ -76,8 +76,12 @@ function Invoke-Resume {
 
     $tmpl = Get-CntResumeCmd
 
-    # The prompt ends up inside the command string: neutralise quotes.
-    $cmd = $tmpl.Replace('{prompt}', ($Prompt -replace "'", "''"))
+    # The prompt ends up as PowerShell code inside -Command: neutralise the
+    # characters that would otherwise expand or break quoting at resume time
+    # ($, backtick) or at schedule time ("). Single quotes are doubled for
+    # templates that place {prompt} inside '...'. Mirrors the sh escaping.
+    $escPrompt = $Prompt.Replace('`', '``').Replace('$', '`$').Replace('"', '`"').Replace("'", "''")
+    $cmd = $tmpl.Replace('{prompt}', $escPrompt)
 
     $delay = Get-CntHhmmDelay $Hhmm
 
@@ -101,8 +105,13 @@ function Invoke-Resume {
 
     # Detached: survives closing the terminal, does NOT survive a reboot.
     # The wakelock is released after the task finishes (or on cancel).
+    # Paths are single-quote escaped: a project dir like C:\o'brien must not
+    # break out of Set-Location '...'.
     $corePs1 = Join-Path $PSScriptRoot '../lib/core.ps1'
-    $inner = ". '$corePs1'; Start-Sleep -Seconds $delay; Set-Location '$Dir'; $cmd *>> '$log'$wlCleanup"
+    $escCore = $corePs1.Replace("'", "''")
+    $escDir = $Dir.Replace("'", "''")
+    $escLog = $log.Replace("'", "''")
+    $inner = ". '$escCore'; Start-Sleep -Seconds $delay; Set-Location '$escDir'; $cmd *>> '$escLog'$wlCleanup"
     $ps = (Get-Process -Id $PID).Path
     $proc = Start-Process -FilePath $ps -WindowStyle Hidden -PassThru `
                           -ArgumentList '-NoProfile', '-NonInteractive', '-Command', $inner

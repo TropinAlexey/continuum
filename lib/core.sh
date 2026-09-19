@@ -62,16 +62,22 @@ cnt_read() {
             IFS=','
             for prov in $CNT_PROVIDER; do
                 unset IFS
-                out=$(cnt_read_single "$prov") || continue
+                # The list is comma-separated, so "anthropic, spend" keeps a
+                # leading space that would otherwise fail provider lookup.
+                prov=$(printf '%s' "$prov" | tr -d '[:space:]')
+                [ -z "$prov" ] && { IFS=','; continue; }
+                out=$(cnt_read_single "$prov") || { IFS=','; continue; }
                 line1=$(printf '%s\n' "$out" | head -1)
                 u=$(printf '%s' "$line1" | awk '{print $2}')
-                u_i=${u%%.*}
-                case "$u_i" in ''|*[!0-9]*) u_i=0 ;; esac
-                if [ "$u_i" -gt "$best_util" ]; then
-                    best_util=$u_i; best_line="$line1"
+                case "$u" in ''|*[!0-9.]*) u=0 ;; esac
+                # Float comparison: 86.9 must beat 86.1 (integer truncation
+                # would call them equal and keep whichever ran first).
+                if awk -v a="$u" -v b="$best_util" 'BEGIN{exit !(a+0 > b+0)}'; then
+                    best_util=$u; best_line="$line1"
                 fi
                 rest="${rest}$(printf '%s\n' "$out" | tail -n +2)
 "
+                IFS=','
             done
             unset IFS
             [ -z "$best_line" ] && { echo "all providers failed" >&2; return 1; }
@@ -107,6 +113,9 @@ cnt_iso_epoch() {
 
 # cnt_epoch_hhmm 1783000000 [margin_seconds] -> local HH:MM
 cnt_epoch_hhmm() {
+    # A custom provider returning garbage must not kill the caller under
+    # `set -eu` via a failed $(( )) arithmetic expansion: validate first.
+    case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac
     e=$(( $1 + ${2:-0} ))
     date -r "$e" +%H:%M 2>/dev/null && return 0    # BSD
     date -d "@$e" +%H:%M 2>/dev/null && return 0   # GNU

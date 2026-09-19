@@ -53,7 +53,10 @@ mkdir -p "$claude_hooks" 2>/dev/null || true
 cp "$DEST/hooks/statusline.sh" "$claude_hooks/statusline.sh" 2>/dev/null || true
 
 settings="$claude_dir/settings.json"
-if [ -f "$settings" ] && ! grep -q '"statusLine"' "$settings"; then
+if [ ! -f "$settings" ]; then
+    printf '{\n  "statusLine": { "type": "command", "command": "sh \"$HOME/.claude/hooks/statusline.sh\"" }\n}\n' > "$settings" 2>/dev/null || true
+    say "status line enabled in settings.json"
+elif ! grep -q '"statusLine"' "$settings"; then
     awk 'NR==1{print; print "  \"statusLine\": { \"type\": \"command\", \"command\": \"sh \\\"$HOME/.claude/hooks/statusline.sh\\\"\" },"; next}{print}' "$settings" > "$settings.tmp" && mv "$settings.tmp" "$settings"
     say "status line enabled in settings.json"
 fi

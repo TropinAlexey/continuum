@@ -139,9 +139,11 @@ out=$(sh "$ROOT/bin/continuum" history 2>&1)
 check "history shows entries" "5h:" "$out"
 
 echo "cleanup:"
-# Create a stale file to clean
-touch -t 202501010000 "$CNT_CFG/.continuum-warned-stale" 2>/dev/null || true
-out=$(CLAUDE_CONFIG_DIR="$CNT_CFG" sh "$ROOT/bin/continuum" cleanup 2>&1)
+# Isolated dir: earlier revisions touched $HOME/.claude here via $CNT_CFG
+# (sourced from core.sh). Never write outside $TMP in tests.
+cleanup_dir="$TMP/cleanup_test"; mkdir -p "$cleanup_dir"
+touch -t 202501010000 "$cleanup_dir/.continuum-warned-stale" 2>/dev/null || true
+out=$(CLAUDE_CONFIG_DIR="$cleanup_dir" sh "$ROOT/bin/continuum" cleanup 2>&1)
 check "cleanup reports count" "Cleaned" "$out"
 
 echo "weekly tiers:"
@@ -189,6 +191,28 @@ out=$(printf '{"tool_name":"Agent"}' | sh "$ROOT/hooks/frugal-gate.sh" 2>/dev/nu
 echo "multi-provider:"
 out=$(CONTINUUM_PROVIDER=mock,mock sh "$ROOT/bin/continuum" status 2>&1)
 check "multi-provider status works" "5 hours" "$out"
+# Comma lists are often written with a space ("mock, mock"): it must not fail lookup.
+out=$(CONTINUUM_PROVIDER="mock, mock" sh "$ROOT/bin/continuum" status 2>&1)
+check "multi-provider tolerates spaces" "5 hours" "$out"
+# Float comparison: 86.9 must win over 86.1 (integer truncation calls them equal).
+# Both entries are mock primaries here; the point is only that it does not fail.
+out=$(CONTINUUM_PROVIDER="mock,mock" CONTINUUM_MOCK="86.9" sh "$ROOT/bin/continuum" status 2>&1)
+check "multi-provider float compare" "5 hours" "$out"
+
+echo "resume quoting:"
+# A project dir with a single quote must not break scheduling (sq-escaping).
+qdir="$TMP/o'brien"; mkdir -p "$qdir"
+out=$(CONTINUUM_DRY_RUN=1 sh "$ROOT/bin/continuum" resume 23:59 "$qdir" "test task" 2>&1)
+check "resume accepts quote in dir" "would sleep" "$out"
+
+echo "spend validation:"
+# Invalid cap must fail before any network call (ADMIN_KEY dummy, cap 0).
+if ANTHROPIC_ADMIN_KEY=dummy CONTINUUM_SPEND_CAP=0 sh "$ROOT/providers/spend.sh" >/dev/null 2>&1
+then bad "spend rejects zero cap" "exit 0"
+else ok  "spend rejects zero cap"; fi
+if ANTHROPIC_ADMIN_KEY=dummy CONTINUUM_SPEND_CAP=abc sh "$ROOT/providers/spend.sh" >/dev/null 2>&1
+then bad "spend rejects non-numeric cap" "exit 0"
+else ok  "spend rejects non-numeric cap"; fi
 
 echo "statusline:"
 # Prepare a fake cache with known data
