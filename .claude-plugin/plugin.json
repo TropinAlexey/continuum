@@ -1,7 +1,7 @@
 {
   "name": "continuum",
-  "description": "See the usage limit coming, decide together what to do with what is left, and pick up where you stopped. Provider-agnostic.",
-  "version": "0.5.0",
+  "description": "See the usage limit coming, decide together what to do with what is left, and pick up where you stopped. Provider- and agent-agnostic.",
+  "version": "0.6.0",
   "author": {
     "name": "Alexey Tropin",
     "url": "https://github.com/TropinAlexey"
@@ -15,7 +15,8 @@
     "budget",
     "hooks",
     "auto-resume",
-    "claude-code"
+    "claude-code",
+    "agent-agnostic"
   ],
   "skills": "./skills/"
 }

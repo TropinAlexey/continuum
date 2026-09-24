@@ -56,26 +56,24 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
 
 ## Текущее состояние (2026-09-24)
 
-- `main` = `origin/main` (HEAD `e2e6085`) + **незакоммиченный подпроект 1 agent-agnostic** в рабочем дереве (коммит — только по просьбе пользователя).
-- Подпроект 1 сделан: agent-нейтральное ядро (`continuum check`, `CNT_STATE` + миграция, root-указатель, пресеты resume) + `adapters/claude/`. **Тесты: sh 114/114 (и под dash), ps 91/91**, shellcheck чист, e2e-установка в изолированный HOME проверена.
-- v0.5.0 зарелизен; v0.5.1 так и не выпущен — после этой работы логичнее сразу v0.6.0 (смена пути состояния).
+- **v0.6.0 — agent-agnostic, подпроект 1 из 5**: ветка `feat/agent-neutral-core` → PR в `main`, тег `v0.6.0` на merge-коммите. Первый тег в репо (до этого релиз = bump-коммит).
+- Сделано: agent-нейтральное ядро (`continuum check`, `CNT_STATE` + миграция из `~/.claude`, root-указатель, пресеты resume) + `adapters/claude/`. **Тесты: sh 114/114 (и под dash), ps 91/91**, shellcheck чист, e2e-установка в изолированный HOME проверена.
 
 ## Прогресс последней недели
 
 - 16.09: wakelock, README v0.5.0 En/Ru, statusline 30s-кэш, BSD, bump версии, лого/иконки — запушено.
 - 17.09: rebase/push `14cf032`, README-рерайт + resume-no-commit, statusline race-fix (tmp+atomic mv) + `continuum statusline config`, 63/63 на тот момент.
 - 18–20.09: code-review hardening, PS statusline + конфиг, 84/84, merge PR #1 (`e2e6085`). Детально — `.remember/today-2026-09-1*.md`, `recent.md`.
-- 24.09: agent-agnostic, подпроект 1 (ядро + Claude-адаптер), 114/91 тестов, не закоммичено.
+- 24.09: agent-agnostic, подпроект 1 (ядро + Claude-адаптер), 114/91 тестов, релиз v0.6.0.
 
 ## Дальше (беклог, по приоритету)
 
-1. **Закоммитить подпроект 1** (ветка `feat/agent-neutral-core`, PR) → релиз **v0.6.0**: бейдж в README ×2 + `plugin.json`, обе сюиты, тег.
-2. **Адаптер Codex CLI** (подпроект 2) — своя спека по актуальной доке Codex: хуки, соблюдает ли `block`, пресет resume, строка в `cnt_ask_hint`.
-3. **Адаптер opencode** (подпроект 3) — JS-плагин, зовущий `continuum check`.
-4. **Адаптеры Cursor и Gemini CLI** (подпроект 4).
-5. **`continuum install --agent <x>`** + доки (подпроект 5); заодно проверить marketplace-установку с нуля.
-6. **Новый провайдер** — OpenAI или Gemini по `docs/writing-a-provider.md` (отдельная ось от агентов).
-7. Мелочи: statusline по умолчанию печатает `86%%` (формат `{d%}%` дублирует `%`) — баг, был до agent-agnostic; `continuum cleanup` от `.DS_Store`-мусора?
+1. **Адаптер Codex CLI** (подпроект 2) — своя спека по актуальной доке Codex: хуки, соблюдает ли `block`, пресет resume, строка в `cnt_ask_hint`.
+2. **Адаптер opencode** (подпроект 3) — JS-плагин, зовущий `continuum check`.
+3. **Адаптеры Cursor и Gemini CLI** (подпроект 4).
+4. **`continuum install --agent <x>`** + доки (подпроект 5); заодно проверить marketplace-установку с нуля.
+5. **Новый провайдер** — OpenAI или Gemini по `docs/writing-a-provider.md` (отдельная ось от агентов).
+6. Мелочи: statusline по умолчанию печатает `86%%` (формат `{d%}%` дублирует `%`) — баг, был до agent-agnostic; `continuum cleanup` от `.DS_Store`-мусора?
 
 ## Feedback от агентов (обязательно)
 
