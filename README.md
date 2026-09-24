@@ -52,13 +52,13 @@ Install both for the full experience: CLI for the command, plugin for automation
 
 ## What happens
 
-When utilization crosses a threshold, Claude stops and asks:
+When utilization crosses a threshold, your agent stops and asks:
 
 > *Window is 86% full, resets at 21:40. What do we do?*
 
 Options include: wrap up, finish the current batch, save & auto-resume, frugal mode (blocks subagents), cheap tasks only, or ignore. Asks in your language. Tiered warnings — **80% → 90% → 95% → 99%** — each fires once. Weekly window tracked separately (**70% → 85% → 95%**). If usage drops back below the threshold (limit top-up or window rollover), tiers re-arm and fire again on the way up.
 
-Choose "save and continue" → commits, schedules `claude --continue` for after reset, gives you the PID. Close your laptop. Session resumes without you.
+Choose "save and continue" → commits, schedules your agent (`claude --continue` by default) for after reset, gives you the PID. Close your laptop. Session resumes without you.
 
 ## Usage
 
@@ -71,31 +71,47 @@ continuum watch       # poll in a spare pane; bell at threshold
 continuum history     # last 20 usage snapshots
 continuum cleanup     # remove stale flag/cache files (>24h old)
 continuum providers   # anthropic, mock, spend
+continuum check       # prints a warning when a new tier is crossed, else nothing
 continuum statusline  # show status-line format config
 
 continuum resume "$(continuum reset)" "$PWD" "finish the DocumentService tests"
 ```
 
-**Other agents:** `continuum watch` and `continuum resume` work without the plugin:
+## Agents
+
+continuum is agent-agnostic: the core (`bin/`, `lib/`, `providers/`) never asks which agent is calling. Each agent gets a thin adapter in `adapters/<agent>/` that translates its hook protocol to `continuum check` and back.
+
+| Agent | In-session warning | Resume preset | Status |
+|---|---|---|---|
+| **Claude Code** | `Stop` hook → `adapters/claude/` | `CONTINUUM_AGENT=claude` (default) | Supported, tested in CI |
+| Codex CLI, opencode, Cursor, Gemini CLI | adapters planned | set `CONTINUUM_RESUME_CMD` | Use `continuum check` / `continuum watch` meanwhile |
+| Anything else | `continuum check` from a hook, or `continuum watch` in a spare pane | set `CONTINUUM_RESUME_CMD` | Works today |
 
 ```sh
 CONTINUUM_RESUME_CMD='codex exec "{prompt}"'    continuum resume 21:41 "$PWD" "finish the tests"
 CONTINUUM_RESUME_CMD='opencode run "{prompt}"'  continuum resume 21:41 "$PWD" "finish the tests"
 ```
 
-See [docs/harnesses.md](docs/harnesses.md) for what's tested.
+The agent and the provider are independent: a Codex session can watch the Anthropic window, and vice versa. See [docs/harnesses.md](docs/harnesses.md) for what's tested and how to write an adapter.
 
 ## How it works
 
-Claude Code runs a `Stop` hook after every turn. A hook that prints `{"decision":"block","reason":"..."}` sends the reason back to the model instead of ending the turn. That's the whole trick.
+Agents that have hooks run one after every turn. In Claude Code, a `Stop` hook that prints `{"decision":"block","reason":"..."}` sends the reason back to the model instead of ending the turn. That's the whole trick.
 
-Four pieces:
+```
+agent event ──► adapters/<agent>/ ──► continuum check ──► provider
+                (agent protocol)       (tiers, cache,      (usage, reset)
+                                        flags, message)
+```
 
 1. **Provider** (`providers/anthropic.sh`) — `curl` to the usage endpoint, prints `5h 86.5 1783000000` (window, percent, reset epoch). The entire provider contract is these three columns.
-2. **Stop hook** (`hooks/continuum-check.sh`) — calls the provider through a 10-min cache (positive and negative), compares against tiers, prints the blocking JSON. Checks `stop_hook_active` first (otherwise infinite loop). Per-session flag means each tier fires once.
-3. **PreToolUse hook** (`hooks/frugal-gate.sh`) — in frugal mode (`CONTINUUM_FRUGAL=1`), blocks `Agent` calls at hook level.
-4. **Skill** (`skills/session-budget`) — what the reason tells Claude to run. Shows the situation, offers choices via `AskUserQuestion`. Never decides for you.
-5. **`continuum resume`** — schedules `claude --continue -p "$PROMPT"` for after reset. Picks the best OS scheduler automatically, prevents sleep, notifies on completion.
+2. **`continuum check`** — the agent-neutral core of the warning: calls the provider through a 10-min cache (positive and negative), compares against tiers, prints the warning text or nothing. A per-session flag means each tier fires once.
+3. **Adapter** (`adapters/claude/stop.sh`) — turns Claude's `Stop` event into `continuum check --session … --agent claude` and the text into blocking JSON. Checks `stop_hook_active` first (otherwise infinite loop).
+4. **Frugal gate** (`adapters/claude/frugal-gate.sh`) — in frugal mode (`CONTINUUM_FRUGAL=1`), blocks `Agent` calls at hook level.
+5. **Skill** (`skills/session-budget`) — what the warning tells the agent to run. Shows the situation, asks the user (in Claude Code via `AskUserQuestion`). Never decides for you.
+6. **`continuum resume`** — schedules your agent's headless command for after reset. Picks the best OS scheduler automatically, prevents sleep, notifies on completion.
+
+State (cache, flags, logs, status-line config, your own providers) lives in continuum's own directory: `$CONTINUUM_STATE_DIR`, else `$XDG_STATE_HOME/continuum`, else `~/.local/state/continuum`. On first run continuum copies its old files out of `~/.claude` (the originals stay).
 
 ## Resume
 
@@ -109,7 +125,7 @@ Four pieces:
 | Windows | detached process | no | `SetThreadExecutionState` |
 | Fallback | `nohup sleep` | no | best available |
 
-Log: `~/.claude/continuum-resume.log` — markers `### resumed in DIR` / `### end (exit N)`. Desktop notification on completion (`osascript` / `notify-send`).
+Log: `continuum-resume.log` in the state dir — markers `### resumed in DIR` / `### end (exit N)`. Desktop notification on completion (`osascript` / `notify-send`).
 
 ## Status line
 
@@ -126,7 +142,7 @@ Shows usage percentage in the Claude Code status bar: **green** (<80%), **yellow
 
 Plugin install copies the script automatically (the CLI installer enables it in `settings.json` too, creating the file if missing).
 
-Windows (PowerShell): use `hooks/statusline.ps1` as the `statusLine` command and `continuum.ps1 statusline` for the same config keys.
+Windows (PowerShell): use `adapters/claude/statusline.ps1` as the `statusLine` command and `continuum.ps1 statusline` for the same config keys.
 
 Customize the format — tokens `{d%}` daily %, `{w%}` weekly %, `{dr}` daily reset, `{wr}` weekly reset:
 
@@ -159,12 +175,12 @@ Windows without Git Bash — override hooks in `settings.json`:
   "hooks": {
     "Stop": [{ "hooks": [{
       "type": "command",
-      "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/hooks/continuum-check.ps1\"",
+      "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/adapters/claude/stop.ps1\"",
       "shell": "powershell"
     }]}],
     "PreToolUse": [{ "hooks": [{
       "type": "command",
-      "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/hooks/frugal-gate.ps1\"",
+      "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/adapters/claude/frugal-gate.ps1\"",
       "shell": "powershell"
     }]}]
   }
@@ -180,11 +196,14 @@ Windows without Git Bash — override hooks in `settings.json`:
 | `CONTINUUM_THRESHOLD_7D` | `70` | Weekly window threshold. |
 | `CONTINUUM_TIERS_7D` | `70 85 95` | Weekly tiers. |
 | `CONTINUUM_PROVIDER` | `anthropic` | Provider(s), comma-separated. |
-| `CONTINUUM_RESUME_CMD` | `claude --continue …` | Agent command for `resume`. `{prompt}` = task. |
+| `CONTINUUM_AGENT` | `claude` | Agent: picks the `resume` preset and the wording of `continuum check` (`generic` when unset there). |
+| `CONTINUUM_RESUME_CMD` | preset for the agent | Agent command for `resume`. `{prompt}` = task. Wins over the preset. |
 | `CONTINUUM_DRY_RUN` | — | `resume` prints instead of scheduling. |
-| `CONTINUUM_OFF` | — | Disable the Stop hook. |
+| `CONTINUUM_OFF` | — | Disable the warning (`continuum check` and the hooks). |
 | `CONTINUUM_FRUGAL` | — | `1` = frugal mode: blocks Agent calls. |
 | `CONTINUUM_CACHE_MIN` | `10` | Cache duration (minutes). `0` disables. |
+| `CONTINUUM_STATE_DIR` | `~/.local/state/continuum` | Where cache, flags, logs and config live. Setting it skips the migration from `~/.claude`. |
+| `CONTINUUM_ROOT` | the install dir | Where the code lives, when a script cannot tell by itself. |
 | `CONTINUUM_SPEND_CAP` | `100` | Monthly budget ($) for the `spend` provider. Must be a positive number. |
 | `ANTHROPIC_ADMIN_KEY` | — | Admin API key for the `spend` provider. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — | OAuth token for the `anthropic` provider. Fallback when Keychain / `~/.claude/.credentials.json` have nothing usable. |
@@ -197,25 +216,26 @@ Windows without Git Bash — override hooks in `settings.json`:
 
 **`no OAuth token found`.** Not logged in or credentials misplaced. Export `CLAUDE_CODE_OAUTH_TOKEN`.
 
-**`continuum resume` didn't work.** Check `~/.claude/continuum-resume.log`. macOS: `launchctl list | grep continuum`. Linux: `systemctl --user list-timers | grep continuum`.
+**`continuum resume` didn't work.** Check `~/.local/state/continuum/continuum-resume.log`. macOS: `launchctl list | grep continuum`. Linux: `systemctl --user list-timers | grep continuum`.
 
 **Warning appears, Claude ignores it.** Lower `CONTINUUM_THRESHOLD`.
 
 ## Contributing
 
 ```
-sh tests/run.sh          # 84 tests, mock provider, no network
+sh tests/run.sh          # 114 tests, mock provider, no network
 pwsh tests/run.ps1       # same suite for PowerShell
 ```
 
-What would help: a provider for another budget (OpenAI, Gemini — see [docs/writing-a-provider.md](docs/writing-a-provider.md)), and confirmation of `Stop` hook behavior in Codex CLI ([docs/harnesses.md](docs/harnesses.md)).
+What would help: a provider for another budget (OpenAI, Gemini — see [docs/writing-a-provider.md](docs/writing-a-provider.md)), and an adapter for another agent ([docs/harnesses.md](docs/harnesses.md)).
 
 ## Uninstall
 
 ```
 /plugin uninstall continuum
 rm -f /usr/local/bin/continuum
-rm -f ~/.claude/.continuum-cache-* ~/.claude/.continuum-warned-* ~/.claude/.continuum-warned7d-* ~/.claude/.continuum-wakelock-* ~/.claude/.continuum-history.log
+rm -rf ~/.local/state/continuum ~/.continuum
+rm -f ~/.claude/.continuum-* ~/.claude/continuum-resume.log   # leftovers from before v0.6
 ```
 
 Or: `continuum cleanup` removes only stale files (>24h).

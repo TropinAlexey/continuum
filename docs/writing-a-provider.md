@@ -20,7 +20,7 @@ A provider is an executable script. It prints one line per usage window on stdou
 | `reset_epoch` | unix seconds, or `-` if unknown | `1783000000` |
 
 The **first line is the primary window** — the one the Stop hook watches against the threshold.
-Extra lines are shown to the user and mentioned to Claude as context.
+Extra lines are shown to the user and mentioned to the agent as context.
 
 On failure: write a human-readable message to **stderr**, print **nothing** to stdout, and exit
 non-zero. Never guess. Never print a fake zero — a provider that invents `0%` tells the user
@@ -72,7 +72,8 @@ CONTINUUM_PROVIDER=yours continuum status; echo "exit=$?"     # must be non-zero
 `continuum providers` lists what it can see. It looks in two places:
 
 1. `providers/` inside the plugin — ship it in a PR, everyone gets it.
-2. `~/.claude/providers/` — your own, private, no PR needed.
+2. `providers/` in the continuum state dir (`~/.local/state/continuum/providers/` by default) —
+   your own, private, no PR needed.
 
 ## What is hard about this
 
