@@ -11,6 +11,19 @@
 Set-StrictMode -Version 2.0
 . (Join-Path $PSScriptRoot '../lib/core.ps1')
 
+function Get-CntToken {
+    if ($env:CLAUDE_CODE_OAUTH_TOKEN) { return $env:CLAUDE_CODE_OAUTH_TOKEN }
+    # Claude Code's own config dir, not continuum's state dir: the token is Claude's.
+    $claudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
+    $f = Join-Path $claudeDir '.credentials.json'
+    if (Test-Path $f) {
+        $raw = Get-Content -Raw -Path $f | ConvertFrom-Json
+        if ($raw.claudeAiOauth -and $raw.claudeAiOauth.accessToken) { return $raw.claudeAiOauth.accessToken }
+        if ($raw.accessToken) { return $raw.accessToken }
+    }
+    return $null
+}
+
 $token = Get-CntToken
 if (-not $token) {
     [Console]::Error.WriteLine('no OAuth token found - are you logged in to Claude Code?')

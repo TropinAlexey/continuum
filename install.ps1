@@ -21,7 +21,7 @@ $here = if ($PSScriptRoot) { $PSScriptRoot } else { $null }
 if ($here -and (Test-Path (Join-Path $here 'bin/continuum.ps1'))) {
     Write-Host "  copying from $here"
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
-    foreach ($d in 'bin', 'lib', 'providers', 'hooks', 'skills') {
+    foreach ($d in 'bin', 'lib', 'providers', 'adapters', 'hooks', 'skills') {
         if (Test-Path (Join-Path $here $d)) {
             Copy-Item -Recurse -Force (Join-Path $here $d) $dest
         }
@@ -38,6 +38,14 @@ if ($here -and (Test-Path (Join-Path $here 'bin/continuum.ps1'))) {
 } else {
     throw 'need either a local checkout or git installed'
 }
+
+# Tell scripts started without any environment (a status line) where the code
+# lives; loading the core also migrates old state out of ~/.claude.
+try {
+    $env:CONTINUUM_ROOT = $dest
+    . (Join-Path $dest 'lib/core.ps1')
+    Set-CntRootPointer
+} catch { } finally { Remove-Item Env:CONTINUUM_ROOT -ErrorAction SilentlyContinue }
 
 # --- 2. put continuum on the PATH -------------------------------------
 $bin = Join-Path $dest 'bin'

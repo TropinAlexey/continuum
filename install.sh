@@ -28,7 +28,7 @@ here=""
 if [ -n "$here" ] && [ -f "$here/bin/continuum" ]; then
     say "copying from $here"
     mkdir -p "$DEST"
-    for d in bin lib providers hooks skills; do
+    for d in bin lib providers adapters hooks skills; do
         [ -d "$here/$d" ] && cp -R "$here/$d" "$DEST/"
     done
 elif command -v git >/dev/null 2>&1; then
@@ -44,13 +44,17 @@ else
     die "need either a local checkout or git installed"
 fi
 
-chmod +x "$DEST/bin/continuum" "$DEST/hooks/"*.sh "$DEST/providers/"*.sh 2>/dev/null || true
+chmod +x "$DEST/bin/continuum" "$DEST/hooks/"*.sh "$DEST/adapters/"*/*.sh "$DEST/providers/"*.sh 2>/dev/null || true
 
-# Copy statusline hook and auto-configure it in settings.json
+# Tell scripts started without any environment (the status line below) where the
+# code lives; loading the core also migrates old state out of ~/.claude.
+(CNT_ROOT="$DEST" CONTINUUM_ROOT="$DEST" . "$DEST/lib/core.sh" && cnt_set_root_pointer) 2>/dev/null || true
+
+# Claude Code: copy the status line and auto-configure it in settings.json
 claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 claude_hooks="$claude_dir/hooks"
 mkdir -p "$claude_hooks" 2>/dev/null || true
-cp "$DEST/hooks/statusline.sh" "$claude_hooks/statusline.sh" 2>/dev/null || true
+cp "$DEST/adapters/claude/statusline.sh" "$claude_hooks/statusline.sh" 2>/dev/null || true
 
 settings="$claude_dir/settings.json"
 if [ ! -f "$settings" ]; then

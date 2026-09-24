@@ -8,6 +8,9 @@ $env:CLAUDE_PLUGIN_ROOT = $root
 $env:CONTINUUM_PROVIDER = 'mock'
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("continuum-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+# State goes to $tmp, never to the real home: tests that need their own state
+# dir override CONTINUUM_STATE_DIR.
+$env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
 
 $script:pass = 0
 $script:fail = 0
@@ -18,8 +21,8 @@ function Check ($n, $expect, $actual) {
     else { Bad $n "expected to contain '$expect', got: $actual" }
 }
 function Hook ($cfg, $stdin) {
-    $env:CLAUDE_CONFIG_DIR = Join-Path $tmp $cfg
-    $out = $stdin | & pwsh -NoProfile -File (Join-Path $root 'hooks/continuum-check.ps1') 2>$null
+    $env:CONTINUUM_STATE_DIR = Join-Path $tmp $cfg
+    $out = $stdin | & pwsh -NoProfile -File (Join-Path $root 'adapters/claude/stop.ps1') 2>$null
     return ($out -join '')
 }
 # NB: do not name this `Cli` - that is a built-in alias for Clear-Item, and
@@ -57,6 +60,17 @@ Check "default agent is claude"   'claude --continue -p "finish it"' (Dry $null 
 Check "swappable agent"           'pwsh exec "run it"'               (Dry 'pwsh exec "{prompt}"' 'run it')
 Check "template without {prompt}" 'pwsh --continue'                  (Dry 'pwsh --continue' 'ignored')
 Check "hostile prompt escaped"    '`"the`"'                          (Dry 'pwsh exec "{prompt}"' 'fix "the" bug')
+if (Test-Path Env:CONTINUUM_RESUME_CMD) { Remove-Item Env:CONTINUUM_RESUME_CMD }
+
+$env:CONTINUUM_AGENT = 'claude'
+Check "agent preset claude" 'claude --continue' (Dry $null 'x')
+$env:CONTINUUM_AGENT = 'nope'
+$env:CONTINUUM_DRY_RUN = '1'
+Invoke-Continuum resume '23:59' $root 'x' *>$null
+if ($LASTEXITCODE -ne 0) { Ok "unknown agent without command fails" } else { Bad "unknown agent without command fails" "exit 0" }
+Remove-Item Env:CONTINUUM_DRY_RUN
+Check "explicit command beats preset" 'pwsh exec "y' (Dry 'pwsh exec "{prompt}"' 'y')
+Remove-Item Env:CONTINUUM_AGENT
 if (Test-Path Env:CONTINUUM_RESUME_CMD) { Remove-Item Env:CONTINUUM_RESUME_CMD }
 
 # No dry run here: the PATH check only runs on the real scheduling path.
@@ -151,16 +165,114 @@ Remove-Item Env:CONTINUUM_THRESHOLD
 Remove-Item Env:CONTINUUM_MOCK
 Remove-Item Env:CONTINUUM_CACHE_MIN
 
-# The hook must never exit non-zero: use a file as the config dir to simulate
+# The hook must never exit non-zero: use a file as the state dir to simulate
 # an unwritable location (mirrors the /proc/nonexistent case in run.sh).
 $blocker = Join-Path $tmp 'blocker-file'
 Set-Content -Path $blocker -Value 'x'
-$env:CLAUDE_CONFIG_DIR = $blocker
-'{"session_id":"g"}' | & pwsh -NoProfile -File (Join-Path $root 'hooks/continuum-check.ps1') *>$null
-if ($LASTEXITCODE -eq 0) { Ok "exit 0 on unwritable config dir" } else { Bad "exit 0 on unwritable config dir" "non-zero exit" }
+$env:CONTINUUM_STATE_DIR = $blocker
+'{"session_id":"g"}' | & pwsh -NoProfile -File (Join-Path $root 'adapters/claude/stop.ps1') *>$null
+if ($LASTEXITCODE -eq 0) { Ok "exit 0 on unwritable state dir" } else { Bad "exit 0 on unwritable state dir" "non-zero exit" }
+
+Write-Host "check (agent-neutral):"
+function Chk ($dir) {
+    $env:CONTINUUM_STATE_DIR = Join-Path $tmp "chk/$dir"
+    $o = Invoke-Continuum check --session s @args
+    $env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
+    return ($o -join "`n")
+}
+$out = Chk 'g'
+Check "check warns over threshold" "[continuum] The primary usage window is 86% used" $out
+Check "check generic wording"      "ask the user how to spend the rest" $out
+if ($out -match 'AskUserQuestion|"decision"') { Bad "check output is agent-neutral" $out } else { Ok "check output is agent-neutral" }
+$out = Chk 'g'
+if (-not $out) { Ok "check warns once per tier" } else { Bad "check warns once per tier" "warned twice" }
+Check "check claude wording" "use AskUserQuestion" (Chk 'c' --agent claude)
+$env:CONTINUUM_AGENT = 'claude'
+Check "check agent from env" "use AskUserQuestion" (Chk 'e')
+Remove-Item Env:CONTINUUM_AGENT
+$env:CONTINUUM_MOCK = '46.0 10.0'
+$out = Chk 'u'
+if (-not $out) { Ok "check silent under threshold" } else { Bad "check silent under threshold" $out }
+Remove-Item Env:CONTINUUM_MOCK
+$env:CONTINUUM_MOCK_FAIL = '1'
+$out = Chk 'f'
+if (-not $out) { Ok "check silent when provider fails" } else { Bad "check silent when provider fails" $out }
+Remove-Item Env:CONTINUUM_MOCK_FAIL
+Invoke-Continuum check --bogus x *>$null
+if ($LASTEXITCODE -ne 0) { Ok "check rejects bad args" } else { Bad "check rejects bad args" "exit 0" }
+# The Claude adapter must produce exactly what the pre-adapter hook did.
+Check "adapter keeps claude text" 'then use AskUserQuestion to ask the user how to spend the rest of the window, offering the options from that skill.' (Hook 'ad' '{"session_id":"ad"}')
+$out = Hook 'ad2' '{"session_id": "ad2", "stop_hook_active": true}'
+if (-not $out) { Ok "adapter respects spaced stop_hook_active" } else { Bad "adapter respects spaced stop_hook_active" $out }
+$env:CONTINUUM_STATE_DIR = Join-Path $tmp 'fw'
+$out = '{"session_id":"fw"}' | & pwsh -NoProfile -File (Join-Path $root 'hooks/continuum-check.ps1') 2>$null
+Check "old hook path still works" '"decision":"block"' ($out -join '')
+$env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
+
+Write-Host "state dir:"
+function StateDir ($stateDir, $xdg, $home_) {
+    $script = "`$env:CONTINUUM_STATE_DIR = '$stateDir'; `$env:XDG_STATE_HOME = '$xdg'; " +
+        "if (-not `$env:CONTINUUM_STATE_DIR) { Remove-Item Env:CONTINUUM_STATE_DIR -ErrorAction SilentlyContinue }; " +
+        "if (-not `$env:XDG_STATE_HOME) { Remove-Item Env:XDG_STATE_HOME -ErrorAction SilentlyContinue }; " +
+        "Set-Variable -Name HOME -Value '$home_' -Force -Scope Global -ErrorAction SilentlyContinue; " +
+        ". '$root/lib/core.ps1'; `$script:CntState"
+    return (& pwsh -NoProfile -Command $script 2>$null) -join ''
+}
+$h0 = Join-Path $tmp 'h0'
+Check "state dir from CONTINUUM_STATE_DIR" (Join-Path $tmp 'x1') (StateDir (Join-Path $tmp 'x1') '' $h0)
+Check "state dir from XDG_STATE_HOME" (Join-Path (Join-Path $tmp 'x2') 'continuum') (StateDir '' (Join-Path $tmp 'x2') $h0)
+
+Write-Host "migration:"
+$mClaude = Join-Path $tmp 'mh/.claude'
+$ms = Join-Path $tmp 'mh/state'
+New-Item -ItemType Directory -Force -Path (Join-Path $mClaude 'providers'), $ms | Out-Null
+Set-Content -Path (Join-Path $mClaude '.continuum-statusline.conf') -Value 'TODAY=sehodnya'
+Set-Content -Path (Join-Path $mClaude 'continuum-resume.log') -Value 'old log'
+Set-Content -Path (Join-Path $mClaude '.continuum-cache-mock') -Value 'cache'
+Set-Content -Path (Join-Path $mClaude '.continuum-history.log') -Value 'old hist'
+Set-Content -Path (Join-Path $mClaude 'providers/mine.ps1') -Value "'x 1 -'"
+Set-Content -Path (Join-Path $ms '.continuum-history.log') -Value 'kept'
+# Migration is skipped when CONTINUUM_STATE_DIR is explicit, so point XDG at it.
+function Migrate {
+    $saved = $env:CONTINUUM_STATE_DIR
+    Remove-Item Env:CONTINUUM_STATE_DIR
+    $env:XDG_STATE_HOME = Join-Path $tmp 'mh'
+    $env:CLAUDE_CONFIG_DIR = $mClaude
+    Rename-Item -Path $ms -NewName 'continuum' -ErrorAction SilentlyContinue
+    $o = Invoke-Continuum providers
+    Rename-Item -Path (Join-Path $tmp 'mh/continuum') -NewName 'state' -ErrorAction SilentlyContinue
+    Remove-Item Env:XDG_STATE_HOME, Env:CLAUDE_CONFIG_DIR
+    $env:CONTINUUM_STATE_DIR = $saved
+    return ($o -join "`n")
+}
+$out = Migrate
+Check "migration copies statusline conf" "sehodnya" ((Get-Content (Join-Path $ms '.continuum-statusline.conf') -ErrorAction SilentlyContinue) -join '')
+Check "migration copies resume log" "old log" ((Get-Content (Join-Path $ms 'continuum-resume.log') -ErrorAction SilentlyContinue) -join '')
+Check "migration copies user providers" "mine" $out
+Check "migration never overwrites" "kept" ((Get-Content (Join-Path $ms '.continuum-history.log')) -join '')
+if (-not (Test-Path (Join-Path $ms '.continuum-cache-mock'))) { Ok "migration skips cache" } else { Bad "migration skips cache" "copied" }
+if (Test-Path (Join-Path $ms '.migrated')) { Ok "migration leaves a marker" } else { Bad "migration leaves a marker" "missing" }
+if (Test-Path (Join-Path $mClaude 'continuum-resume.log')) { Ok "migration keeps originals" } else { Bad "migration keeps originals" "deleted" }
+Set-Content -Path (Join-Path $mClaude '.continuum-statusline.conf') -Value 'NEW=1'
+$null = Migrate
+Check "migration runs once" "sehodnya" ((Get-Content (Join-Path $ms '.continuum-statusline.conf')) -join '')
+
+Write-Host "root pointer:"
+$rp = Join-Path $tmp 'rp'
+New-Item -ItemType Directory -Force -Path (Join-Path $rp 'copy') | Out-Null
+$env:CONTINUUM_STATE_DIR = Join-Path $rp 'state'
+$null = Invoke-Continuum providers
+Check "cli records root pointer" ((Resolve-Path $root).Path) ((Get-Content (Join-Path $rp 'state/root') -ErrorAction SilentlyContinue) -join '')
+Copy-Item (Join-Path $root 'adapters/claude/statusline.ps1') (Join-Path $rp 'copy/statusline.ps1')
+$savedRoot = $env:CLAUDE_PLUGIN_ROOT
+Remove-Item Env:CLAUDE_PLUGIN_ROOT
+$out = & pwsh -NoProfile -File (Join-Path $rp 'copy/statusline.ps1') 2>$null
+$env:CLAUDE_PLUGIN_ROOT = $savedRoot
+Check "copied statusline finds core via pointer" "86%" ($out -join '')
+$env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
 
 Write-Host "estimate:"
-$env:CLAUDE_CONFIG_DIR = Join-Path $tmp 'cli'
+$env:CONTINUUM_STATE_DIR = Join-Path $tmp 'cli'
 Check "estimate shows time left"  "At this pace" ((Invoke-Continuum estimate) -join "`n")
 Check "estimate shows utilization" "Currently"   ((Invoke-Continuum estimate) -join "`n")
 
@@ -175,7 +287,7 @@ $clDir = Join-Path $tmp 'cleanup_test'
 New-Item -ItemType Directory -Force -Path $clDir | Out-Null
 $stale = New-Item -ItemType File -Force -Path (Join-Path $clDir '.continuum-warned-stale')
 $stale.LastWriteTime = (Get-Date).AddHours(-25)
-$env:CLAUDE_CONFIG_DIR = $clDir
+$env:CONTINUUM_STATE_DIR = $clDir
 Check "cleanup reports count" "Cleaned" ((Invoke-Continuum cleanup) -join "`n")
 
 Write-Host "weekly tiers:"
@@ -193,8 +305,8 @@ Remove-Item Env:CONTINUUM_MOCK
 Remove-Item Env:CONTINUUM_CACHE_MIN
 
 Write-Host "wakelock:"
-$env:CLAUDE_CONFIG_DIR = Join-Path $tmp 'wl'
-New-Item -ItemType Directory -Force -Path $env:CLAUDE_CONFIG_DIR | Out-Null
+$env:CONTINUUM_STATE_DIR = Join-Path $tmp 'wl'
+New-Item -ItemType Directory -Force -Path $env:CONTINUUM_STATE_DIR | Out-Null
 . (Join-Path $root 'lib/core.ps1')
 # No cnt_wakelock_wrap equivalent here: Start-Job/caffeinate/systemd-inhibit
 # cover the same sleeps, so test start/stop directly.
@@ -231,19 +343,19 @@ if ($wlFile) {
 # nohup resume path should mention sleep inhibition (sh) - here the dry run
 # at least proves scheduling with an active wakelock helper set.
 $env:CONTINUUM_DRY_RUN = '1'
-$env:CLAUDE_CONFIG_DIR = Join-Path $tmp 'cli'
+$env:CONTINUUM_STATE_DIR = Join-Path $tmp 'cli'
 Check "dry run resume works with wakelock" "would sleep" ((Invoke-Continuum resume '23:59' $root 'test task') -join "`n")
 Remove-Item Env:CONTINUUM_DRY_RUN -ErrorAction SilentlyContinue
 
 Write-Host "frugal gate:"
 # The PreToolUse hook blocks Agent when CONTINUUM_FRUGAL=1
 $env:CONTINUUM_FRUGAL = '1'
-$out = '{"tool_name":"Agent"}' | & pwsh -NoProfile -File (Join-Path $root 'hooks/frugal-gate.ps1') 2>$null
+$out = '{"tool_name":"Agent"}' | & pwsh -NoProfile -File (Join-Path $root 'adapters/claude/frugal-gate.ps1') 2>$null
 Check "frugal blocks Agent" '"decision":"block"' ($out -join '')
-$out = '{"tool_name":"Read"}' | & pwsh -NoProfile -File (Join-Path $root 'hooks/frugal-gate.ps1') 2>$null
+$out = '{"tool_name":"Read"}' | & pwsh -NoProfile -File (Join-Path $root 'adapters/claude/frugal-gate.ps1') 2>$null
 if (-not ($out -join '')) { Ok "frugal allows Read" } else { Bad "frugal allows Read" ($out -join '') }
 Remove-Item Env:CONTINUUM_FRUGAL
-$out = '{"tool_name":"Agent"}' | & pwsh -NoProfile -File (Join-Path $root 'hooks/frugal-gate.ps1') 2>$null
+$out = '{"tool_name":"Agent"}' | & pwsh -NoProfile -File (Join-Path $root 'adapters/claude/frugal-gate.ps1') 2>$null
 if (-not ($out -join '')) { Ok "no frugal allows Agent" } else { Bad "no frugal allows Agent" ($out -join '') }
 
 Write-Host "multi-provider:"
@@ -278,7 +390,7 @@ Write-Host "statusline:"
 # Prepare a fake cache with known data
 $slDir = Join-Path $tmp 'sl_test'
 New-Item -ItemType Directory -Force -Path $slDir | Out-Null
-$env:CLAUDE_CONFIG_DIR = $slDir
+$env:CONTINUUM_STATE_DIR = $slDir
 $env:CONTINUUM_PROVIDER = 'mock'
 $nowSec = [int64][datetimeoffset]::UtcNow.ToUnixTimeSeconds()
 $dReset = $nowSec + 3600
@@ -286,7 +398,7 @@ $wReset = $nowSec + 4 * 86400
 Set-Content -Path (Join-Path $slDir '.continuum-cache-mock') -Value @("5h 46.0 $dReset", "7d 94.0 $wReset")
 
 function Invoke-StatuslineHook {
-    $slOut = & pwsh -NoProfile -File (Join-Path $root 'hooks/statusline.ps1') 2>$null
+    $slOut = & pwsh -NoProfile -File (Join-Path $root 'adapters/claude/statusline.ps1') 2>$null
     return ($slOut -join '')
 }
 

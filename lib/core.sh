@@ -19,20 +19,59 @@
 
 # $0 is the caller, which may be a PATH symlink pointing here; a caller that has
 # already resolved its own location passes CNT_ROOT in.
-CNT_ROOT="${CLAUDE_PLUGIN_ROOT:-${CNT_ROOT:-$(dirname "$(dirname "$0")")}}"
-CNT_CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+# CLAUDE_PLUGIN_ROOT is honoured for compatibility: Claude Code sets it for hooks.
+CNT_ROOT="${CONTINUUM_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CNT_ROOT:-$(dirname "$(dirname "$0")")}}}"
 CNT_PROVIDER="${CONTINUUM_PROVIDER:-anthropic}"
+
+# State (cache, flags, logs, config, user providers) is continuum's own, not any
+# agent's. Not ~/.continuum: the installer keeps the code there, and may re-clone it.
+if [ -n "${CONTINUUM_STATE_DIR:-}" ]; then CNT_STATE="$CONTINUUM_STATE_DIR"
+elif [ -n "${XDG_STATE_HOME:-}" ]; then CNT_STATE="$XDG_STATE_HOME/continuum"
+else CNT_STATE="$HOME/.local/state/continuum"; fi
+# shellcheck disable=SC2034  # deprecated alias, kept for third-party providers
+CNT_CFG="$CNT_STATE"
+
+# --- one-time migration from ~/.claude ---------------------------------
+# Before the agent-neutral layout, state lived in the Claude Code config dir. Copy
+# what is worth keeping (never the ephemeral cache/flags), never overwrite, never
+# delete the originals, never fail the caller. No marker on error: retry next run.
+cnt_migrate() {
+    [ -n "${CONTINUUM_STATE_DIR:-}" ] && return 0
+    [ -f "$CNT_STATE/.migrated" ] && return 0
+    _old="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    mkdir -p "$CNT_STATE" 2>/dev/null || return 0
+    if [ -d "$_old" ]; then
+        for _f in .continuum-statusline.conf .continuum-history.log continuum-resume.log; do
+            [ -f "$_old/$_f" ] && [ ! -e "$CNT_STATE/$_f" ] && { cp "$_old/$_f" "$CNT_STATE/$_f" 2>/dev/null || return 0; }
+        done
+        for _f in "$_old"/providers/*.sh "$_old"/providers/*.ps1; do
+            [ -f "$_f" ] || continue
+            mkdir -p "$CNT_STATE/providers" 2>/dev/null || return 0
+            [ -e "$CNT_STATE/providers/${_f##*/}" ] || cp "$_f" "$CNT_STATE/providers/" 2>/dev/null || return 0
+        done
+    fi
+    : > "$CNT_STATE/.migrated" 2>/dev/null || true
+}
+cnt_migrate
+
+# cnt_set_root_pointer -> record where the code lives, for scripts started without
+# any environment (a statusline copied into an agent's config dir).
+cnt_set_root_pointer() {
+    mkdir -p "$CNT_STATE" 2>/dev/null || return 0
+    [ "$(cat "$CNT_STATE/root" 2>/dev/null)" = "$CNT_ROOT" ] && return 0
+    printf '%s\n' "$CNT_ROOT" > "$CNT_STATE/root.tmp" 2>/dev/null && mv "$CNT_STATE/root.tmp" "$CNT_STATE/root" 2>/dev/null || true
+}
 
 # --- provider dispatch -------------------------------------------------
 cnt_provider_path() {
-    for d in "$CNT_ROOT/providers" "$CNT_CFG/providers"; do
+    for d in "$CNT_ROOT/providers" "$CNT_STATE/providers"; do
         [ -f "$d/$1.sh" ] && { printf '%s' "$d/$1.sh"; return 0; }
     done
     return 1
 }
 
 cnt_providers() {
-    for d in "$CNT_ROOT/providers" "$CNT_CFG/providers"; do
+    for d in "$CNT_ROOT/providers" "$CNT_STATE/providers"; do
         [ -d "$d" ] || continue
         for f in "$d"/*.sh; do
             [ -f "$f" ] || continue
@@ -183,7 +222,7 @@ cnt_notify() {
 # --- wakelock (prevent system sleep during scheduled resume) ----------
 # cnt_wakelock_start <seconds> -> prints pidfile path (empty if no tool)
 cnt_wakelock_start() {
-    _wl_pf="$CNT_CFG/.continuum-wakelock-$(date +%s).pid"
+    _wl_pf="$CNT_STATE/.continuum-wakelock-$(date +%s).pid"
     case "$(uname)" in
         Darwin)
             command -v caffeinate >/dev/null 2>&1 || return 0
