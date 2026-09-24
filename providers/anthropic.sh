@@ -29,8 +29,10 @@ _token() {
     if command -v security >/dev/null 2>&1; then
         raw=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null) || raw=""
     fi
-    if [ -z "$raw" ] && [ -f "$CNT_CFG/.credentials.json" ]; then
-        raw=$(cat "$CNT_CFG/.credentials.json")
+    # Claude Code's own config dir, not continuum's state dir: the token is Claude's.
+    creds="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json"
+    if [ -z "$raw" ] && [ -f "$creds" ]; then
+        raw=$(cat "$creds")
     fi
     [ -z "$raw" ] && return 1
     # The store also holds an accessToken per MCP OAuth server; take ours.

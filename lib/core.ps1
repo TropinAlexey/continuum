@@ -12,19 +12,68 @@
 
 Set-StrictMode -Version 2.0
 
-if ($env:CLAUDE_CONFIG_DIR) { $script:CntCfg = $env:CLAUDE_CONFIG_DIR }
-else { $script:CntCfg = Join-Path $HOME '.claude' }
+# State (cache, flags, logs, config, user providers) is continuum's own, not any
+# agent's - and the same dir the sh core uses, so Git Bash and PowerShell on one
+# machine share it. Not ~/.continuum: the installer keeps the code there.
+if ($env:CONTINUUM_STATE_DIR) { $script:CntState = $env:CONTINUUM_STATE_DIR }
+elseif ($env:XDG_STATE_HOME) { $script:CntState = Join-Path $env:XDG_STATE_HOME 'continuum' }
+else { $script:CntState = Join-Path $HOME '.local/state/continuum' }
+$script:CntCfg = $script:CntState   # deprecated alias, kept for third-party providers
 
 if ($env:CONTINUUM_PROVIDER) { $script:CntProvider = $env:CONTINUUM_PROVIDER }
 else { $script:CntProvider = 'anthropic' }
 
-if ($env:CLAUDE_PLUGIN_ROOT) { $script:CntRoot = $env:CLAUDE_PLUGIN_ROOT }
+# CLAUDE_PLUGIN_ROOT is honoured for compatibility: Claude Code sets it for hooks.
+if ($env:CONTINUUM_ROOT) { $script:CntRoot = $env:CONTINUUM_ROOT }
+elseif ($env:CLAUDE_PLUGIN_ROOT) { $script:CntRoot = $env:CLAUDE_PLUGIN_ROOT }
 else { $script:CntRoot = Split-Path -Parent $PSScriptRoot }
+
+# One-time migration from ~/.claude, where state lived before the agent-neutral
+# layout. Mirrors cnt_migrate: copy what is worth keeping (never cache/flags),
+# never overwrite, never delete the originals, never throw. No marker on error.
+function Invoke-CntMigrate {
+    if ($env:CONTINUUM_STATE_DIR) { return }
+    $marker = Join-Path $script:CntState '.migrated'
+    if (Test-Path $marker) { return }
+    try {
+        if ($env:CLAUDE_CONFIG_DIR) { $old = $env:CLAUDE_CONFIG_DIR } else { $old = Join-Path $HOME '.claude' }
+        New-Item -ItemType Directory -Force -Path $script:CntState | Out-Null
+        if (Test-Path $old) {
+            foreach ($f in '.continuum-statusline.conf', '.continuum-history.log', 'continuum-resume.log') {
+                $src = Join-Path $old $f; $dst = Join-Path $script:CntState $f
+                if ((Test-Path $src) -and -not (Test-Path $dst)) { Copy-Item -Path $src -Destination $dst }
+            }
+            $oldProv = Join-Path $old 'providers'
+            if (Test-Path $oldProv) {
+                $newProv = Join-Path $script:CntState 'providers'
+                foreach ($p in @(Get-ChildItem -Path $oldProv -File | Where-Object { $_.Extension -in '.sh', '.ps1' })) {
+                    New-Item -ItemType Directory -Force -Path $newProv | Out-Null
+                    $dst = Join-Path $newProv $p.Name
+                    if (-not (Test-Path $dst)) { Copy-Item -Path $p.FullName -Destination $dst }
+                }
+            }
+        }
+        New-Item -ItemType File -Force -Path $marker | Out-Null
+    } catch { }
+}
+Invoke-CntMigrate
+
+# Record where the code lives, for scripts started without any environment
+# (a statusline copied into an agent's config dir). Never throws.
+function Set-CntRootPointer {
+    try {
+        $f = Join-Path $script:CntState 'root'
+        $root = (Resolve-Path $script:CntRoot).Path
+        if ((Test-Path $f) -and ([System.IO.File]::ReadAllText($f).Trim() -eq $root)) { return }
+        New-Item -ItemType Directory -Force -Path $script:CntState | Out-Null
+        [System.IO.File]::WriteAllText($f, "$root`n")
+    } catch { }
+}
 
 function Get-CntProviders {
     # NB: collect first, sort after - a pipeline directly on the function
     # body (`} | Sort-Object`) is a parse error in PowerShell.
-    $all = foreach ($d in @((Join-Path $script:CntRoot 'providers'), (Join-Path $script:CntCfg 'providers'))) {
+    $all = foreach ($d in @((Join-Path $script:CntRoot 'providers'), (Join-Path $script:CntState 'providers'))) {
         if (Test-Path $d) {
             Get-ChildItem -Path $d -Filter '*.ps1' | ForEach-Object { $_.BaseName }
         }
@@ -34,7 +83,7 @@ function Get-CntProviders {
 
 function Get-CntProviderPath {
     param([string]$Name)
-    foreach ($d in @((Join-Path $script:CntRoot 'providers'), (Join-Path $script:CntCfg 'providers'))) {
+    foreach ($d in @((Join-Path $script:CntRoot 'providers'), (Join-Path $script:CntState 'providers'))) {
         $p = Join-Path $d "$Name.ps1"
         if (Test-Path $p) { return $p }
     }
@@ -133,7 +182,7 @@ function Send-CntNotification {
 
 function Start-CntWakeLock {
     param([int]$Seconds)
-    $pidFile = Join-Path $script:CntCfg ".continuum-wakelock-$([int](Get-Date -UFormat %s)).pid"
+    $pidFile = Join-Path $script:CntState ".continuum-wakelock-$([int](Get-Date -UFormat %s)).pid"
     if ($IsWindows -or (-not (Test-Path variable:IsWindows) -and $env:OS -eq 'Windows_NT')) {
         # Launch a hidden job that holds ES_CONTINUOUS|ES_SYSTEM_REQUIRED
         $job = Start-Job -ScriptBlock {
@@ -185,13 +234,3 @@ function Stop-CntWakeLock {
     Remove-Item -Path $PidFile -Force -ErrorAction SilentlyContinue
 }
 
-function Get-CntToken {
-    if ($env:CLAUDE_CODE_OAUTH_TOKEN) { return $env:CLAUDE_CODE_OAUTH_TOKEN }
-    $f = Join-Path $script:CntCfg '.credentials.json'
-    if (Test-Path $f) {
-        $raw = Get-Content -Raw -Path $f | ConvertFrom-Json
-        if ($raw.claudeAiOauth -and $raw.claudeAiOauth.accessToken) { return $raw.claudeAiOauth.accessToken }
-        if ($raw.accessToken) { return $raw.accessToken }
-    }
-    return $null
-}

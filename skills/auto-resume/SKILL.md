@@ -5,8 +5,9 @@ description: Schedule the session to resume automatically after the usage limit 
 
 # Auto-resume after the limit resets
 
-Schedules a detached `claude --continue -p "<prompt>"` in the current project, so the session
-picks up where it stopped once the window resets.
+Schedules a detached headless run of your agent in the current project, so the session picks up
+where it stopped once the window resets. The command comes from `CONTINUUM_RESUME_CMD`, or from
+the preset for `CONTINUUM_AGENT` (default: Claude Code, `claude --continue -p "<prompt>"`).
 
 ## Steps
 
@@ -14,7 +15,7 @@ picks up where it stopped once the window resets.
    - run `continuum reset`, or
    - take the time the user gave you, or the one in the limit message they pasted.
 
-   `continuum` ships with this plugin under `bin/`. If it is not on `PATH`, point the user at
+   `continuum` ships with continuum under `bin/`. If it is not on `PATH`, point the user at
    the README's install section rather than guessing paths.
 
 2. Run, as a single line:
@@ -24,11 +25,13 @@ picks up where it stopped once the window resets.
    DocumentService tests and run the suite" — not a generic "continue".
 
 3. Tell the user: the scheduled time, the PID to cancel with, that output lands in
-   `~/.claude/continuum-resume.log`, and that they can rejoin later with `claude --continue`.
+   `continuum-resume.log` in the continuum state dir (`~/.local/state/continuum` by default), and
+   how to rejoin the session later in their agent (Claude Code: `claude --continue`).
 
 ## Important
 
-- The resumed run is headless (`-p`) with `acceptEdits`: it edits code with nobody watching.
+- The resumed run is headless (with the Claude Code preset: `-p` with `acceptEdits`): it edits
+  code with nobody watching.
   Warn the user for risky tasks and keep the prompt narrow.
 - The prompt MUST be a complete, self-contained instruction — not "continue" or a question.
   The resumed session has no human to answer questions. continuum appends an autonomy

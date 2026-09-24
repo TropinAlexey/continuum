@@ -4,8 +4,10 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-export CLAUDE_PLUGIN_ROOT="$ROOT" CONTINUUM_PROVIDER=mock
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+# State goes to $TMP, never to the real home: every test that needs its own
+# state dir overrides CONTINUUM_STATE_DIR.
+export CLAUDE_PLUGIN_ROOT="$ROOT" CONTINUUM_PROVIDER=mock CONTINUUM_STATE_DIR="$TMP/state"
 
 pass=0; fail=0
 ok()   { pass=$((pass+1)); printf '  ok   %s\n' "$1"; }
@@ -14,7 +16,7 @@ check(){ # check <name> <expected substring> <actual>
     case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "expected to contain '$2', got: $3" ;; esac
 }
 hook() { # hook <config dir> <stdin json>  -> stdout
-    printf '%s' "$2" | CLAUDE_CONFIG_DIR="$TMP/$1" sh "$ROOT/hooks/continuum-check.sh" 2>/dev/null || true
+    printf '%s' "$2" | CONTINUUM_STATE_DIR="$TMP/$1" sh "$ROOT/adapters/claude/stop.sh" 2>/dev/null || true
 }
 
 echo "cli:"
@@ -80,6 +82,11 @@ check "default agent autonomous"  'Work autonomously'                "$(dry '' '
 check "swappable agent"           'sh exec "run it.'                 "$(dry 'sh exec "{prompt}"' 'run it')"
 check "template without {prompt}" 'sh --continue'                    "$(dry 'sh --continue' 'ignored')"
 check "hostile prompt escaped"    '\"the\"'                        "$(dry 'sh run "{prompt}"' 'fix "the" bug')"
+check "agent preset claude"      'claude --continue'                "$(CONTINUUM_AGENT=claude dry '' 'x')"
+if (CONTINUUM_AGENT=nope dry '' 'x') >/dev/null 2>&1
+then bad "unknown agent without command fails" "exit 0"
+else ok  "unknown agent without command fails"; fi
+check "explicit command beats preset" 'sh exec "y.'  "$(CONTINUUM_AGENT=nope dry 'sh exec "{prompt}"' 'y')"
 # No dry run here: the PATH check only runs on the real scheduling path.
 if CONTINUUM_RESUME_CMD='nosuchagent {prompt}' sh "$ROOT/bin/continuum" resume 23:59 "$ROOT" x >/dev/null 2>&1
 then bad "missing agent fails" "exit 0"
@@ -101,7 +108,7 @@ esc=$(printf '\033')
     printf '### end (exit 0) - /tmp/proj\n'
     printf '### 2020-01-01 00:00:00 - resumed in /tmp/old\nancient-marker text\n### end (exit 1) - /tmp/old\n'
 } > "$rr_dir/continuum-resume.log"
-out=$(CLAUDE_CONFIG_DIR="$rr_dir" sh "$ROOT/hooks/resume-report.sh" 2>&1)
+out=$(CONTINUUM_STATE_DIR="$rr_dir" sh "$ROOT/adapters/claude/resume-report.sh" 2>&1)
 check "resume report shows recent"     "Green task done" "$out"
 check "resume report keeps BEL link text" "Linked"    "$out"
 check "resume report keeps ST link text"  "ST-linked" "$out"
@@ -109,7 +116,7 @@ check "resume report strips BEL titles" "titled"         "$out"
 case "$out" in *"$esc"*) bad "resume report strips escapes" "ESC leaked" ;; *) ok "resume report strips escapes" ;; esac
 case "$out" in *ancient-marker*) bad "resume report ignores old entries" "$out" ;; *) ok "resume report ignores old entries" ;; esac
 case "$out" in *http://evil*) bad "resume report strips URLs" "$out" ;; *) ok "resume report strips URLs" ;; esac
-out=$(CLAUDE_CONFIG_DIR="$TMP/rr_missing" sh "$ROOT/hooks/resume-report.sh" 2>&1)
+out=$(CONTINUUM_STATE_DIR="$TMP/rr_missing" sh "$ROOT/adapters/claude/resume-report.sh" 2>&1)
 [ -z "$out" ] && ok "resume report silent without log" || bad "resume report silent without log" "$out"
 
 echo "watch:"
@@ -168,8 +175,67 @@ out=$(CONTINUUM_OFF=1 hook f '{"session_id":"f"}')
 [ -z "$out" ] && ok "respects CONTINUUM_OFF" || bad "respects CONTINUUM_OFF" "$out"
 
 # The hook must never exit non-zero: Claude Code surfaces that to the user.
-printf '{"session_id":"g"}' | CLAUDE_CONFIG_DIR=/proc/nonexistent sh "$ROOT/hooks/continuum-check.sh" >/dev/null 2>&1 \
-    && ok "exit 0 on unwritable config dir" || bad "exit 0 on unwritable config dir" "non-zero exit"
+printf '{"session_id":"g"}' | CONTINUUM_STATE_DIR=/proc/nonexistent sh "$ROOT/adapters/claude/stop.sh" >/dev/null 2>&1 \
+    && ok "exit 0 on unwritable state dir" || bad "exit 0 on unwritable state dir" "non-zero exit"
+
+echo "check (agent-neutral):"
+chkn() { d="$1"; shift; CONTINUUM_STATE_DIR="$TMP/chk/$d" sh "$ROOT/bin/continuum" check --session s "$@" 2>&1; }
+out=$(chkn g)
+check "check warns over threshold" "[continuum] The primary usage window is 86% used" "$out"
+check "check generic wording"      "ask the user how to spend the rest" "$out"
+case "$out" in *AskUserQuestion*|*'"decision"'*) bad "check output is agent-neutral" "$out" ;; *) ok "check output is agent-neutral" ;; esac
+[ -z "$(chkn g)" ] && ok "check warns once per tier" || bad "check warns once per tier" "warned twice"
+check "check claude wording" "use AskUserQuestion" "$(chkn c --agent claude)"
+check "check agent from env" "use AskUserQuestion" "$(CONTINUUM_AGENT=claude CONTINUUM_STATE_DIR="$TMP/chk/e" sh "$ROOT/bin/continuum" check 2>&1)"
+[ -z "$(CONTINUUM_MOCK="46.0 10.0" chkn u)" ] && ok "check silent under threshold" || bad "check silent under threshold" "warned"
+[ -z "$(CONTINUUM_MOCK_FAIL=1 chkn f)" ] && ok "check silent when provider fails" || bad "check silent when provider fails" "output"
+if sh "$ROOT/bin/continuum" check --bogus >/dev/null 2>&1; then bad "check rejects bad args" "exit 0"; else ok "check rejects bad args"; fi
+# The Claude adapter must produce exactly what the pre-adapter hook did.
+out=$(hook ad '{"session_id":"ad"}')
+check "adapter keeps claude text" 'then use AskUserQuestion to ask the user how to spend the rest of the window, offering the options from that skill.' "$out"
+out=$(hook ad2 '{"session_id": "ad2", "stop_hook_active": true}')
+[ -z "$out" ] && ok "adapter respects spaced stop_hook_active" || bad "adapter respects spaced stop_hook_active" "$out"
+out=$(printf '{"session_id":"fw"}' | CONTINUUM_STATE_DIR="$TMP/fw" sh "$ROOT/hooks/continuum-check.sh" 2>/dev/null)
+check "old hook path still works" '"decision":"block"' "$out"
+
+echo "state dir:"
+sd() { (unset CONTINUUM_STATE_DIR XDG_STATE_HOME; eval "$1"; . "$ROOT/lib/core.sh"; printf '%s' "$CNT_STATE"); }
+check "state dir from CONTINUUM_STATE_DIR" "$TMP/x1" "$(sd "export CONTINUUM_STATE_DIR='$TMP/x1' HOME='$TMP/h0'")"
+check "state dir from XDG_STATE_HOME" "$TMP/x2/continuum" "$(sd "export XDG_STATE_HOME='$TMP/x2' HOME='$TMP/h0'")"
+check "state dir default" "$TMP/h0/.local/state/continuum" "$(sd "export HOME='$TMP/h0'")"
+
+echo "migration:"
+mh="$TMP/mh"; mkdir -p "$mh/.claude/providers"
+echo 'TODAY=сегодня' > "$mh/.claude/.continuum-statusline.conf"
+echo 'old log' > "$mh/.claude/continuum-resume.log"
+echo 'cache' > "$mh/.claude/.continuum-cache-mock"
+echo 'echo "x 1 -"' > "$mh/.claude/providers/mine.sh"
+ms="$mh/.local/state/continuum"; mkdir -p "$ms"; echo 'kept' > "$ms/.continuum-history.log"
+echo 'old hist' > "$mh/.claude/.continuum-history.log"
+out=$(unset CONTINUUM_STATE_DIR XDG_STATE_HOME CLAUDE_CONFIG_DIR; HOME="$mh" sh "$ROOT/bin/continuum" providers 2>&1)
+check "migration copies statusline conf" "сегодня" "$(cat "$ms/.continuum-statusline.conf" 2>/dev/null)"
+check "migration copies resume log" "old log" "$(cat "$ms/continuum-resume.log" 2>/dev/null)"
+check "migration copies user providers" "mine" "$out"
+check "migration never overwrites" "kept" "$(cat "$ms/.continuum-history.log")"
+[ ! -e "$ms/.continuum-cache-mock" ] && ok "migration skips cache" || bad "migration skips cache" "copied"
+[ -f "$ms/.migrated" ] && ok "migration leaves a marker" || bad "migration leaves a marker" "missing"
+[ -f "$mh/.claude/continuum-resume.log" ] && ok "migration keeps originals" || bad "migration keeps originals" "deleted"
+echo 'NEW=1' > "$mh/.claude/.continuum-statusline.conf"
+(unset CONTINUUM_STATE_DIR XDG_STATE_HOME CLAUDE_CONFIG_DIR; HOME="$mh" sh "$ROOT/bin/continuum" providers >/dev/null 2>&1)
+check "migration runs once" "сегодня" "$(cat "$ms/.continuum-statusline.conf")"
+
+echo "root pointer:"
+rp="$TMP/rp"; mkdir -p "$rp/copy"
+CONTINUUM_STATE_DIR="$rp/state" sh "$ROOT/bin/continuum" providers >/dev/null
+check "cli records root pointer" "$ROOT" "$(cat "$rp/state/root" 2>/dev/null)"
+cp "$ROOT/adapters/claude/statusline.sh" "$rp/copy/statusline.sh"
+(unset CLAUDE_PLUGIN_ROOT; CONTINUUM_STATE_DIR="$rp/state" sh "$rp/copy/statusline.sh" >/dev/null 2>&1)
+i=0; while [ ! -f "$rp/state/.continuum-cache-mock" ] && [ $i -lt 20 ]; do sleep 0.2 2>/dev/null || sleep 1; i=$((i+1)); done
+[ -f "$rp/state/.continuum-cache-mock" ] && ok "copied statusline finds core via pointer" || bad "copied statusline finds core via pointer" "no cache refresh"
+cd_=$TMP/rp_claude; mkdir -p "$cd_/hooks"; printf '#!/bin/sh\n# continuum old\n' > "$cd_/hooks/statusline.sh"
+(CLAUDE_CONFIG_DIR="$cd_" CONTINUUM_STATE_DIR="$rp/state2" sh "$ROOT/adapters/claude/setup-statusline.sh" >/dev/null 2>&1)
+cmp -s "$ROOT/adapters/claude/statusline.sh" "$cd_/hooks/statusline.sh" && ok "setup refreshes stale statusline copy" || bad "setup refreshes stale statusline copy" "not refreshed"
+check "setup records root pointer" "$ROOT" "$(cat "$rp/state2/root" 2>/dev/null)"
 
 echo "estimate:"
 out=$(sh "$ROOT/bin/continuum" estimate 2>&1)
@@ -182,11 +248,11 @@ out=$(sh "$ROOT/bin/continuum" history 2>&1)
 check "history shows entries" "5h:" "$out"
 
 echo "cleanup:"
-# Isolated dir: earlier revisions touched $HOME/.claude here via $CNT_CFG
+# Isolated dir: earlier revisions touched the real home here via the state dir
 # (sourced from core.sh). Never write outside $TMP in tests.
 cleanup_dir="$TMP/cleanup_test"; mkdir -p "$cleanup_dir"
 touch -t 202501010000 "$cleanup_dir/.continuum-warned-stale" 2>/dev/null || true
-out=$(CLAUDE_CONFIG_DIR="$cleanup_dir" sh "$ROOT/bin/continuum" cleanup 2>&1)
+out=$(CONTINUUM_STATE_DIR="$cleanup_dir" sh "$ROOT/bin/continuum" cleanup 2>&1)
 check "cleanup reports count" "Cleaned" "$out"
 
 echo "weekly tiers:"
@@ -224,11 +290,11 @@ check "dry run resume works with wakelock" "would sleep" "$out"
 
 echo "frugal gate:"
 # The PreToolUse hook blocks Agent when CONTINUUM_FRUGAL=1
-out=$(printf '{"tool_name":"Agent"}' | CONTINUUM_FRUGAL=1 sh "$ROOT/hooks/frugal-gate.sh" 2>/dev/null)
+out=$(printf '{"tool_name":"Agent"}' | CONTINUUM_FRUGAL=1 sh "$ROOT/adapters/claude/frugal-gate.sh" 2>/dev/null)
 check "frugal blocks Agent" '"decision":"block"' "$out"
-out=$(printf '{"tool_name":"Read"}' | CONTINUUM_FRUGAL=1 sh "$ROOT/hooks/frugal-gate.sh" 2>/dev/null)
+out=$(printf '{"tool_name":"Read"}' | CONTINUUM_FRUGAL=1 sh "$ROOT/adapters/claude/frugal-gate.sh" 2>/dev/null)
 [ -z "$out" ] && ok "frugal allows Read" || bad "frugal allows Read" "$out"
-out=$(printf '{"tool_name":"Agent"}' | sh "$ROOT/hooks/frugal-gate.sh" 2>/dev/null)
+out=$(printf '{"tool_name":"Agent"}' | sh "$ROOT/adapters/claude/frugal-gate.sh" 2>/dev/null)
 [ -z "$out" ] && ok "no frugal allows Agent" || bad "no frugal allows Agent" "$out"
 
 echo "multi-provider:"
@@ -265,26 +331,26 @@ d_reset=$(( now + 3600 ))
 w_reset=$(( now + 4 * 86400 ))
 printf '5h 46.0 %s\n7d 94.0 %s\n' "$d_reset" "$w_reset" > "$sl_dir/.continuum-cache-mock"
 
-sl_out=$(CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/hooks/statusline.sh" 2>/dev/null)
+sl_out=$(CONTINUUM_STATE_DIR="$sl_dir" sh "$ROOT/adapters/claude/statusline.sh" 2>/dev/null)
 check "statusline shows daily percent" "46%" "$sl_out"
 check "statusline shows weekly percent" "94%" "$sl_out"
 check "statusline shows today for daily" "today" "$sl_out"
 
 # Test config commands
-out=$(CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/bin/continuum" statusline)
+out=$(CONTINUUM_STATE_DIR="$sl_dir" sh "$ROOT/bin/continuum" statusline)
 check "statusline cmd shows format" "format" "$out"
 
-CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/bin/continuum" statusline today "сегодня" >/dev/null
-sl_out=$(CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/hooks/statusline.sh" 2>/dev/null)
+CONTINUUM_STATE_DIR="$sl_dir" sh "$ROOT/bin/continuum" statusline today "сегодня" >/dev/null
+sl_out=$(CONTINUUM_STATE_DIR="$sl_dir" sh "$ROOT/adapters/claude/statusline.sh" 2>/dev/null)
 check "statusline respects today config" "сегодня" "$sl_out"
 
-CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/bin/continuum" statusline reset >/dev/null
-sl_out=$(CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/hooks/statusline.sh" 2>/dev/null)
+CONTINUUM_STATE_DIR="$sl_dir" sh "$ROOT/bin/continuum" statusline reset >/dev/null
+sl_out=$(CONTINUUM_STATE_DIR="$sl_dir" sh "$ROOT/adapters/claude/statusline.sh" 2>/dev/null)
 check "statusline reset restores defaults" "today" "$sl_out"
 
 # Test format-single (no weekly data)
 printf '5h 46.0 %s\n' "$d_reset" > "$sl_dir/.continuum-cache-mock"
-sl_out=$(CLAUDE_CONFIG_DIR="$sl_dir" sh "$ROOT/hooks/statusline.sh" 2>/dev/null)
+sl_out=$(CONTINUUM_STATE_DIR="$sl_dir" sh "$ROOT/adapters/claude/statusline.sh" 2>/dev/null)
 check "statusline single shows daily" "46%" "$sl_out"
 case "$sl_out" in *94%*) bad "statusline single hides weekly" "found 94% in: $sl_out" ;; *) ok "statusline single hides weekly" ;; esac
 

@@ -5,11 +5,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/resume-report.sh\""
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/adapters/claude/resume-report.sh\""
           },
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/setup-statusline.sh\""
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/adapters/claude/setup-statusline.sh\""
           }
         ]
       }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/continuum-check.sh\""
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/adapters/claude/stop.sh\""
           }
         ]
       }
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/frugal-gate.sh\""
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/adapters/claude/frugal-gate.sh\""
           }
         ]
       }

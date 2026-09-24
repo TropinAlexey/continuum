@@ -1,13 +1,13 @@
 ---
 name: session-budget
-description: Agree a plan for the rest of the usage limit window with the user. Use when the [continuum] Stop hook reports the window crossed the threshold, or when the user asks "how much budget is left", "what do we do about the limit", "we're about to run out".
+description: Agree a plan for the rest of the usage limit window with the user. Use when a [continuum] warning (from an agent hook or `continuum check`) reports the window crossed the threshold, or when the user asks "how much budget is left", "what do we do about the limit", "we're about to run out".
 ---
 
 # Plan for the rest of the limit window
 
 ## 1. Get the facts
 
-The hook that woke you already put the numbers in its message. Use those; do not spend a
+The warning that woke you already put the numbers in its message. Use those; do not spend a
 tool call re-fetching. If the user asked cold, without a hook firing:
 
 ```
@@ -17,7 +17,7 @@ continuum status
 Prints utilization and reset time for every window the provider reports. The exact reset
 time for the scheduler is `continuum reset` (format `HH:MM`).
 
-If `continuum` is not on `PATH`, it ships with this plugin under `bin/` — see the README's
+If `continuum` is not on `PATH`, it ships with continuum under `bin/` — see the README's
 install section. Do not go hunting for the path.
 
 ## 2. State where we stopped
@@ -25,7 +25,10 @@ install section. Do not go hunting for the path.
 One or two sentences: what is done, what remains, whether there are uncommitted changes.
 A resumed session — or the user tomorrow — has none of your context. Write for them.
 
-## 3. Ask the user via AskUserQuestion
+## 3. Ask the user
+
+Use your agent's structured question tool if it has one (in Claude Code: AskUserQuestion);
+otherwise ask in plain text with numbered options and wait for the answer.
 
 Ask in the language the user has been speaking, not necessarily English — translate the
 question and every option label accordingly.
@@ -39,9 +42,9 @@ Offer 3-4 options that fit the moment, recommended one first:
 | **Finish the task set, then stop** | Complete the remaining planned tasks (the current TODO batch), then stop — no new scope. Offer this only when what's left is a bounded, known set that plausibly fits the remaining window; skip it if the work is open-ended. |
 | **Save state and schedule a resume** | Commit or stash, then `continuum resume "$(continuum reset)" "$PWD" "<specific task>"` so the session continues itself after the reset. |
 | **Resume after reset (no commit)** | Stash changes (no commit), then schedule `continuum resume` so the session picks up automatically after the reset. The resumed session unstashes first. |
-| **Frugal mode** | Keep going, but: no subagents, no large files into context, short answers. Run `export CONTINUUM_FRUGAL=1` to enforce via hook, suggest `/compact`. |
+| **Frugal mode** | Keep going, but: no subagents, no large files into context, short answers. Run `export CONTINUUM_FRUGAL=1` to enforce via hook where the adapter supports it, suggest compacting the context (`/compact` in Claude Code). |
 | **Cheap tasks only** | Spend the rest on docs, commit messages, README; postpone heavy code analysis. |
-| **Switch model** | Move to a cheaper model (`/model`) for routine work. |
+| **Switch model** | Move to a cheaper model (`/model` in Claude Code) for routine work. |
 | **Carry on as usual** | Ignore the warning; if the limit hits, the user runs `continuum resume` themselves. |
 
 ## 4. Execute the choice
@@ -63,7 +66,7 @@ continuum resume "$(continuum reset)" "$PWD" "git stash pop && <specific task de
 - Threshold floor: `CONTINUUM_THRESHOLD` (default 80).
 - Tiers: `CONTINUUM_TIERS` (default `80 90 95 99`).
 - Provider: `CONTINUUM_PROVIDER` (default `anthropic`).
-- Disable the hook: `CONTINUUM_OFF=1`.
+- Disable the warning: `CONTINUUM_OFF=1`.
 - Fires once per tier crossed, not once per session: after 80% it stays quiet until usage
-  reaches 90%, then 95%, then 99% (flag `~/.claude/.continuum-warned-<session_id>` holds the
-  highest tier already warned).
+  reaches 90%, then 95%, then 99% (flag `.continuum-warned-<session_id>` in the continuum state
+  dir, `~/.local/state/continuum` by default, holds the highest tier already warned).
