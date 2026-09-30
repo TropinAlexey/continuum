@@ -469,8 +469,8 @@ cmd_statusline() {
 
     if [ -z "$key" ]; then
         printf 'Status-line config (%s):\n' "$conf"
-        echo "  format        = $(_sl_get FORMAT '{d%}% d {dr} | {w%}% w {wr}')"
-        echo "  format-single = $(_sl_get FORMAT_SINGLE '{d%}% d {dr}')"
+        echo "  format        = $(_sl_get FORMAT '{d%} d {dr} | {w%} w {wr}')"
+        echo "  format-single = $(_sl_get FORMAT_SINGLE '{d%} d {dr}')"
         echo "  time          = $(_sl_get TIME_FORMAT '%H:%M')"
         echo "  date          = $(_sl_get DATE_FORMAT '%d.%m')"
         echo "  today         = $(_sl_get TODAY 'today')"

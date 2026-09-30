@@ -415,8 +415,8 @@ function Invoke-StatuslineConfig {
 
     if (-not $Key) {
         "Status-line config ($conf):"
-        "  format        = $(Get-CntSlConfValue 'FORMAT' '{d%}% d {dr} | {w%}% w {wr}')"
-        "  format-single = $(Get-CntSlConfValue 'FORMAT_SINGLE' '{d%}% d {dr}')"
+        "  format        = $(Get-CntSlConfValue 'FORMAT' '{d%} d {dr} | {w%} w {wr}')"
+        "  format-single = $(Get-CntSlConfValue 'FORMAT_SINGLE' '{d%} d {dr}')"
         "  time          = $(Get-CntSlConfValue 'TIME_FORMAT' '%H:%M')"
         "  date          = $(Get-CntSlConfValue 'DATE_FORMAT' '%d.%m')"
         "  today         = $(Get-CntSlConfValue 'TODAY' 'today')"

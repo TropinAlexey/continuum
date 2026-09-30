@@ -335,6 +335,38 @@ sl_out=$(CONTINUUM_STATE_DIR="$sl_dir" sh "$ROOT/adapters/claude/statusline.sh" 
 check "statusline shows daily percent" "46%" "$sl_out"
 check "statusline shows weekly percent" "94%" "$sl_out"
 check "statusline shows today for daily" "today" "$sl_out"
+esc_=$(printf '\033')
+case "$sl_out" in *"${esc_}[0m%"*) bad "statusline no double percent" "got: $sl_out" ;; *) ok "statusline no double percent" ;; esac
+CONTINUUM_STATE_DIR="$sl_dir" sh "$ROOT/bin/continuum" statusline format '{d%}% d {dr} | {w%}% w {wr}' >/dev/null
+sl_out=$(CONTINUUM_STATE_DIR="$sl_dir" sh "$ROOT/adapters/claude/statusline.sh" 2>/dev/null)
+case "$sl_out" in *"${esc_}[0m%"*) bad "statusline legacy format no double percent" "got: $sl_out" ;; *) ok "statusline legacy format no double percent" ;; esac
+
+# A cache past its window's reset (or long untouched) is refreshed in the
+# foreground: the very first render already shows current numbers.
+sf_dir="$TMP/sl_stale"; mkdir -p "$sf_dir"
+printf '5h 12.0 %s\n7d 20.0 %s\n' "$(( now - 60 ))" "$w_reset" > "$sf_dir/.continuum-cache-mock"
+sl_out=$(CONTINUUM_STATE_DIR="$sf_dir" CONTINUUM_MOCK="77.0 33.0" sh "$ROOT/adapters/claude/statusline.sh" 2>/dev/null)
+check "statusline refreshes past-reset cache before render" "77%" "$sl_out"
+printf '5h 12.0 %s\n7d 20.0 %s\n' "$d_reset" "$w_reset" > "$sf_dir/.continuum-cache-mock"
+touch -t 202001010000 "$sf_dir/.continuum-cache-mock"
+sl_out=$(CONTINUUM_STATE_DIR="$sf_dir" CONTINUUM_MOCK="78.0 33.0" sh "$ROOT/adapters/claude/statusline.sh" 2>/dev/null)
+check "statusline refreshes old cache before render" "78%" "$sl_out"
+printf '5h 12.0 %s\n7d 20.0 %s\n' "$d_reset" "$w_reset" > "$sf_dir/.continuum-cache-mock"
+sl_out=$(CONTINUUM_STATE_DIR="$sf_dir" CONTINUUM_MOCK="79.0 33.0" sh "$ROOT/adapters/claude/statusline.sh" 2>/dev/null)
+check "statusline shows fresh cache as-is" "12%" "$sl_out"
+# Provider down: keep showing the old cache, leave a .retry marker (backoff),
+# and clear it on the next successful refresh.
+printf '5h 12.0 %s\n7d 20.0 %s\n' "$(( now - 60 ))" "$w_reset" > "$sf_dir/.continuum-cache-mock"
+sl_out=$(CONTINUUM_STATE_DIR="$sf_dir" CONTINUUM_MOCK_FAIL=1 sh "$ROOT/adapters/claude/statusline.sh" 2>/dev/null)
+check "statusline keeps old cache when provider fails" "12%" "$sl_out"
+[ -f "$sf_dir/.continuum-cache-mock.retry" ] && ok "statusline failed refresh leaves retry marker" || bad "statusline failed refresh leaves retry marker" "missing"
+touch -t 202001010000 "$sf_dir/.continuum-cache-mock.retry"
+sl_out=$(CONTINUUM_STATE_DIR="$sf_dir" CONTINUUM_MOCK="81.0 33.0" sh "$ROOT/adapters/claude/statusline.sh" 2>/dev/null)
+check "statusline retries after backoff" "81%" "$sl_out"
+[ ! -f "$sf_dir/.continuum-cache-mock.retry" ] && ok "statusline success clears retry marker" || bad "statusline success clears retry marker" "still there"
+printf '5h 12.0 %s\n' "99999999999999999999999" > "$sf_dir/.continuum-cache-mock"
+sl_out=$(CONTINUUM_STATE_DIR="$sf_dir" CONTINUUM_MOCK_FAIL=1 sh "$ROOT/adapters/claude/statusline.sh" 2>/dev/null)
+check "statusline survives garbage epoch" "12%" "$sl_out"
 
 # Test config commands
 out=$(CONTINUUM_STATE_DIR="$sl_dir" sh "$ROOT/bin/continuum" statusline)

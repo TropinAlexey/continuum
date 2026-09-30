@@ -26,13 +26,36 @@ CNT_PROVIDER=$(printf '%s' "$CNT_PROVIDER" | tr -d '[:space:]' | tr -c 'A-Za-z0-
 cache="$CNT_STATE/.continuum-cache-$CNT_PROVIDER"
 conf="$CNT_STATE/.continuum-statusline.conf"
 
-# Background refresh if cache is older than 30s; atomic write via tmp+mv.
+# Refresh if cache is older than 30s; atomic write via tmp+mv.
 # The tmp file carries the PID: two sessions refreshing at once must not share it.
+# Usually in the background (shown next render). But a cache that is plainly wrong -
+# missing, older than 10 min, or past its window's reset - is refreshed in the
+# foreground: the first render of a session must not show last night's numbers,
+# and Claude Code does not re-render until the first request.
+# A failed foreground refresh leaves a .retry marker: for 2 min after it we go
+# back to the background, or an offline machine would stall every render.
 root=$(find_root) || root=""
 if [ -n "$root" ] && { [ ! -f "$cache" ] || [ -z "$(find "$cache" -mmin -0.5 2>/dev/null)" ]; }; then
     mkdir -p "$CNT_STATE" 2>/dev/null || true
     _tmp="$cache.$$.tmp"
-    (CNT_ROOT="$root" . "$root/lib/core.sh" && cnt_read > "$_tmp" 2>/dev/null && mv "$_tmp" "$cache" || rm -f "$_tmp") &
+    _retry="$cache.retry"
+    _stale=0
+    if [ ! -f "$cache" ] || [ -n "$(find "$cache" -mmin +10 2>/dev/null)" ]; then _stale=1
+    else
+        _r=$(awk 'NR==1{print $3}' "$cache")
+        # Length cap: a garbage epoch must not overflow the shell's arithmetic.
+        case "$_r" in ''|*[!0-9]*|?????????????*) ;; *) [ "$_r" -le "$(date +%s)" ] && _stale=1 ;; esac
+    fi
+    [ -f "$_retry" ] && [ -n "$(find "$_retry" -mmin -2 2>/dev/null)" ] && _stale=0
+    if [ "$_stale" = 1 ]; then
+        if (CNT_ROOT="$root" . "$root/lib/core.sh" && cnt_read > "$_tmp" 2>/dev/null && mv "$_tmp" "$cache"); then
+            rm -f "$_retry"
+        else
+            rm -f "$_tmp"; : > "$_retry" 2>/dev/null || true
+        fi
+    else
+        (CNT_ROOT="$root" . "$root/lib/core.sh" && cnt_read > "$_tmp" 2>/dev/null && mv "$_tmp" "$cache" || rm -f "$_tmp") &
+    fi
 fi
 
 [ -f "$cache" ] || exit 0
@@ -58,8 +81,8 @@ _conf_val() {
     [ -n "$v" ] && printf '%s' "$v" || return 1
 }
 
-fmt=$(_conf_val FORMAT 2>/dev/null) || fmt='{d%}% d {dr} | {w%}% w {wr}'
-fmt_single=$(_conf_val FORMAT_SINGLE 2>/dev/null) || fmt_single='{d%}% d {dr}'
+fmt=$(_conf_val FORMAT 2>/dev/null) || fmt='{d%} d {dr} | {w%} w {wr}'
+fmt_single=$(_conf_val FORMAT_SINGLE 2>/dev/null) || fmt_single='{d%} d {dr}'
 time_fmt=$(_conf_val TIME_FORMAT 2>/dev/null) || time_fmt='%H:%M'
 date_fmt=$(_conf_val DATE_FORMAT 2>/dev/null) || date_fmt='%d.%m'
 today_word=$(_conf_val TODAY 2>/dev/null) || today_word='today'
@@ -87,16 +110,19 @@ _sub() {
 d_colored=$(printf '\033[%sm%s%%\033[0m' "$(cnt_color "$d_pct")" "$d_pct")
 d_reset_str=$(_fmt_reset "$d_reset")
 
+# {d%}/{w%} already carry the '%'; old defaults added another ("86%%"),
+# so a saved "{d%}%" collapses to "{d%}".
 if [ -n "$w_pct" ]; then
     w_colored=$(printf '\033[%sm%s%%\033[0m' "$(cnt_color "$w_pct")" "$w_pct")
     w_reset_str=$(_fmt_reset "$w_reset")
-    out="$fmt"
+    out=$(_sub "$fmt" '{w%}%' '{w%}')
     out=$(_sub "$out" '{w%}' "$w_colored")
     out=$(_sub "$out" '{wr}' "$w_reset_str")
 else
     out="$fmt_single"
 fi
 
+out=$(_sub "$out" '{d%}%' '{d%}')
 out=$(_sub "$out" '{d%}' "$d_colored")
 out=$(_sub "$out" '{dr}' "$d_reset_str")
 printf '%s' "$out"

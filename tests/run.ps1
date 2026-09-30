@@ -406,6 +406,43 @@ $slOut = Invoke-StatuslineHook
 Check "statusline shows daily percent" "46%" $slOut
 Check "statusline shows weekly percent" "94%" $slOut
 Check "statusline shows today for daily" "today" $slOut
+if ($slOut -notmatch '\x1b\[0m%') { Ok "statusline no double percent" } else { Bad "statusline no double percent" "got: $slOut" }
+$null = Invoke-Continuum statusline format '{d%}% d {dr} | {w%}% w {wr}'
+$slOut = Invoke-StatuslineHook
+if ($slOut -notmatch '\x1b\[0m%') { Ok "statusline legacy format no double percent" } else { Bad "statusline legacy format no double percent" "got: $slOut" }
+
+# A cache past its window's reset (or long untouched) is refreshed synchronously.
+$sfDir = Join-Path $tmp 'sl_stale'
+New-Item -ItemType Directory -Force -Path $sfDir | Out-Null
+$sfCache = Join-Path $sfDir '.continuum-cache-mock'
+$env:CONTINUUM_STATE_DIR = $sfDir
+Set-Content -Path $sfCache -Value @("5h 12.0 $($nowSec - 60)", "7d 20.0 $wReset")
+$env:CONTINUUM_MOCK = '77.0 33.0'
+Check "statusline refreshes past-reset cache before render" "77%" (Invoke-StatuslineHook)
+Set-Content -Path $sfCache -Value @("5h 12.0 $dReset", "7d 20.0 $wReset")
+(Get-Item -Force $sfCache).LastWriteTime = [datetime]'2020-01-01'
+$env:CONTINUUM_MOCK = '78.0 33.0'
+Check "statusline refreshes old cache before render" "78%" (Invoke-StatuslineHook)
+Set-Content -Path $sfCache -Value @("5h 12.0 $dReset", "7d 20.0 $wReset")
+$env:CONTINUUM_MOCK = '79.0 33.0'
+Check "statusline shows fresh cache as-is" "12%" (Invoke-StatuslineHook)
+# Provider down: old cache stays, a .retry marker backs off further attempts.
+Set-Content -Path $sfCache -Value @("5h 12.0 $($nowSec - 60)", "7d 20.0 $wReset")
+$env:CONTINUUM_MOCK_FAIL = '1'
+Check "statusline keeps old cache when provider fails" "12%" (Invoke-StatuslineHook)
+Remove-Item Env:CONTINUUM_MOCK_FAIL
+if (Test-Path "$sfCache.retry") { Ok "statusline failed refresh leaves retry marker" } else { Bad "statusline failed refresh leaves retry marker" "missing" }
+$env:CONTINUUM_MOCK = '80.0 33.0'
+Check "statusline backs off while retry marker is fresh" "12%" (Invoke-StatuslineHook)
+(Get-Item -Force "$sfCache.retry").LastWriteTime = [datetime]'2020-01-01'
+$env:CONTINUUM_MOCK = '81.0 33.0'
+Check "statusline retries after backoff" "81%" (Invoke-StatuslineHook)
+if (-not (Test-Path "$sfCache.retry")) { Ok "statusline success clears retry marker" } else { Bad "statusline success clears retry marker" "still there" }
+Set-Content -Path $sfCache -Value @("5h 12.0 99999999999999999999999")
+$env:CONTINUUM_MOCK = '82.0 33.0'
+Check "statusline survives garbage epoch" "12%" (Invoke-StatuslineHook)
+Remove-Item Env:CONTINUUM_MOCK
+$env:CONTINUUM_STATE_DIR = $slDir
 
 # Test config commands
 Check "statusline cmd shows format" "format" ((Invoke-Continuum statusline) -join "`n")
