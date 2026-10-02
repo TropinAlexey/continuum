@@ -34,9 +34,10 @@ conf="$CNT_STATE/.continuum-statusline.conf"
 # and Claude Code does not re-render until the first request.
 # A failed foreground refresh leaves a .retry marker: for 2 min after it we go
 # back to the background, or an offline machine would stall every render.
+# The stale check runs before the 30s gate: a cache written seconds before its
+# window reset is still wrong after it.
 root=$(find_root) || root=""
-if [ -n "$root" ] && { [ ! -f "$cache" ] || [ -z "$(find "$cache" -mmin -0.5 2>/dev/null)" ]; }; then
-    mkdir -p "$CNT_STATE" 2>/dev/null || true
+if [ -n "$root" ]; then
     _tmp="$cache.$$.tmp"
     _retry="$cache.retry"
     _stale=0
@@ -48,12 +49,14 @@ if [ -n "$root" ] && { [ ! -f "$cache" ] || [ -z "$(find "$cache" -mmin -0.5 2>/
     fi
     [ -f "$_retry" ] && [ -n "$(find "$_retry" -mmin -2 2>/dev/null)" ] && _stale=0
     if [ "$_stale" = 1 ]; then
+        mkdir -p "$CNT_STATE" 2>/dev/null || true
         if (CNT_ROOT="$root" . "$root/lib/core.sh" && cnt_read > "$_tmp" 2>/dev/null && mv "$_tmp" "$cache"); then
             rm -f "$_retry"
         else
             rm -f "$_tmp"; : > "$_retry" 2>/dev/null || true
         fi
-    else
+    elif [ ! -f "$cache" ] || [ -z "$(find "$cache" -mmin -0.5 2>/dev/null)" ]; then
+        mkdir -p "$CNT_STATE" 2>/dev/null || true
         (CNT_ROOT="$root" . "$root/lib/core.sh" && cnt_read > "$_tmp" 2>/dev/null && mv "$_tmp" "$cache" || rm -f "$_tmp") &
     fi
 fi
