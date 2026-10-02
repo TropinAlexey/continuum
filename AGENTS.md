@@ -43,8 +43,8 @@
 ## Команды
 
 ```sh
-sh tests/run.sh          # 114 тестов, mock, без сети (эталон; проходит и под dash)
-pwsh tests/run.ps1       # 91 тест, та же сюита для PowerShell
+sh tests/run.sh          # 124 теста, mock, без сети (эталон; проходит и под dash)
+pwsh tests/run.ps1       # 102 теста, та же сюита для PowerShell
 continuum status         # 5h 86.5% resets at 21:40 + weekly строка
 continuum reset          # HH:MM ресета (+90s, для планировщика)
 continuum estimate       # сколько осталось at this pace
@@ -54,8 +54,9 @@ continuum check --session ID --agent claude  # ядро предупрежден
 continuum resume "$(continuum reset)" "$PWD" "конкретная задача"  # NEVER generic "continue"
 ```
 
-## Текущее состояние (2026-09-24)
+## Текущее состояние (2026-09-30)
 
+- **v0.6.1 — патч статус-бара**: устаревший кэш (нет / старше 10 мин / после ресета) обновляется синхронно до первой отрисовки — новая сессия сразу показывает актуальные цифры; после неудачи — маркер `.continuum-cache-<prov>.retry`, 2 мин бэкофф (иначе оффлайн вешал бы каждую отрисовку до 15с). Плюс фикс двойного `%` (`86%%`) и атомарная запись кэша в `.ps1`. **Тесты: sh 124/124 (и под dash), ps 102/102**, shellcheck чист.
 - **v0.6.0 — agent-agnostic, подпроект 1 из 5**: ветка `feat/agent-neutral-core` → PR в `main`, тег `v0.6.0` на merge-коммите. Первый тег в репо (до этого релиз = bump-коммит).
 - Сделано: agent-нейтральное ядро (`continuum check`, `CNT_STATE` + миграция из `~/.claude`, root-указатель, пресеты resume) + `adapters/claude/`. **Тесты: sh 114/114 (и под dash), ps 91/91**, shellcheck чист, e2e-установка в изолированный HOME проверена.
 
@@ -65,6 +66,7 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
 - 17.09: rebase/push `14cf032`, README-рерайт + resume-no-commit, statusline race-fix (tmp+atomic mv) + `continuum statusline config`, 63/63 на тот момент.
 - 18–20.09: code-review hardening, PS statusline + конфиг, 84/84, merge PR #1 (`e2e6085`). Детально — `.remember/today-2026-09-1*.md`, `recent.md`.
 - 24.09: agent-agnostic, подпроект 1 (ядро + Claude-адаптер), 114/91 тестов, релиз v0.6.0.
+- 30.09: v0.6.1 — статус-бар свежий с первой отрисовки (+бэкофф при сбое), фикс `86%%`, ревью безопасности, 124/102 тестов.
 
 ## Дальше (беклог, по приоритету)
 
@@ -73,7 +75,7 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
 3. **Адаптеры Cursor и Gemini CLI** (подпроект 4).
 4. **`continuum install --agent <x>`** + доки (подпроект 5); заодно проверить marketplace-установку с нуля.
 5. **Новый провайдер** — OpenAI или Gemini по `docs/writing-a-provider.md` (отдельная ось от агентов).
-6. Мелочи: statusline по умолчанию печатает `86%%` (формат `{d%}%` дублирует `%`) — баг, был до agent-agnostic; `continuum cleanup` от `.DS_Store`-мусора?
+6. Мелочи: `continuum cleanup` от `.DS_Store`-мусора?
 
 ## Feedback от агентов (обязательно)
 

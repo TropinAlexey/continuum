@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.6.0-brightgreen.svg" alt="version: 0.6.0"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.6.1-brightgreen.svg" alt="version: 0.6.1"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -129,7 +129,7 @@ Log: `continuum-resume.log` in the state dir — markers `### resumed in DIR` / 
 
 ## Status line
 
-Shows usage percentage in the Claude Code status bar: **green** (<80%), **yellow** (80–94%), **red** (≥95%). Updates every ~30s.
+Shows usage percentage in the Claude Code status bar: **green** (<80%), **yellow** (80–94%), **red** (≥95%). Updates every ~30s; a stale cache (older than 10 min or past its reset) is refreshed before the first render, so a new session shows current numbers right away (if the provider is unreachable, the old numbers stay and the next attempt waits 2 min).
 
 ```json
 {
@@ -148,8 +148,8 @@ Customize the format — tokens `{d%}` daily %, `{w%}` weekly %, `{dr}` daily re
 
 ```sh
 continuum statusline                    # show current config
-continuum statusline format "{d%}% d {dr} | {w%}% w {wr}"
-continuum statusline format-single "{d%}% d {dr}"   # shown when only one window exists
+continuum statusline format "{d%} d {dr} | {w%} w {wr}"
+continuum statusline format-single "{d%} d {dr}"   # shown when only one window exists
 continuum statusline time "%H:%M"       # reset time format
 continuum statusline date "%d.%m"       # reset date format (when not today)
 continuum statusline today "today"      # word for same-day resets

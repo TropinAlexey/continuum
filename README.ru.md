@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.6.0-brightgreen.svg" alt="version: 0.6.0"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.6.1-brightgreen.svg" alt="version: 0.6.1"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -129,7 +129,7 @@ CONTINUUM_RESUME_CMD='opencode run "{prompt}"'  continuum resume 21:41 "$PWD" "f
 
 ## Статуслайн
 
-Процент использования в статусной строке Claude Code: **зелёный** (<80%), **жёлтый** (80–94%), **красный** (≥95%). Обновляется каждые ~30с.
+Процент использования в статусной строке Claude Code: **зелёный** (<80%), **жёлтый** (80–94%), **красный** (≥95%). Обновляется каждые ~30с; устаревший кэш (старше 10 мин или после ресета) обновляется до первой отрисовки, так что новая сессия сразу показывает актуальные цифры (если провайдер недоступен — остаются старые цифры, следующая попытка через 2 мин).
 
 ```json
 {
@@ -148,8 +148,8 @@ Windows (PowerShell): в качестве команды `statusLine` испол
 
 ```sh
 continuum statusline                    # показать текущий конфиг
-continuum statusline format "{d%}% d {dr} | {w%}% w {wr}"
-continuum statusline format-single "{d%}% d {dr}"   # когда окно только одно
+continuum statusline format "{d%} d {dr} | {w%} w {wr}"
+continuum statusline format-single "{d%} d {dr}"   # когда окно только одно
 continuum statusline time "%H:%M"       # формат времени сброса
 continuum statusline date "%d.%m"       # формат даты сброса (когда не сегодня)
 continuum statusline today "today"      # слово для сегодняшнего сброса

@@ -6,8 +6,10 @@
 # hook (managed by `continuum.ps1 statusline`).
 #
 # Difference from the sh hook: no background refresh - Start-Job is too heavy
-# for a prompt hook. A missing cache triggers one synchronous read; a present
-# cache is displayed as-is. Prime it with `continuum.ps1 status`.
+# for a prompt hook. A cache that is plainly wrong - missing, older than 10 min,
+# or past its window's reset - triggers one synchronous read (so a fresh session
+# shows current numbers before its first request); otherwise the cache is
+# displayed as-is.
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
@@ -40,14 +42,38 @@ foreach ($c in $candidates) {
 if (-not $root) { exit 0 }
 . (Join-Path $root 'lib/core.ps1')
 
-if (-not (Test-Path $cache)) {
-    # @() is load-bearing: a one-element array unrolls to a scalar.
-    try { $lines = @(Read-CntUsage) }
-    catch { exit 0 }
-    if (-not $lines) { exit 0 }
-    Set-Content -Path $cache -Value $lines
-} else {
+# A failed refresh leaves a .retry marker: for 2 min after it the cache is shown
+# as-is, or an offline machine would stall every render on the provider.
+$retry = "$cache.retry"
+$lines = $null
+$stale = $true
+if (Test-Path $cache) {
     $lines = @(Get-Content -Path $cache)
+    $stale = ((Get-Date) - (Get-Item -Force $cache).LastWriteTime).TotalMinutes -gt 10
+    if (-not $stale -and $lines) {
+        $r = ($lines[0] -split '\s+')
+        # Length cap: a garbage epoch must not overflow [long].
+        if ($r.Count -ge 3 -and $r[2] -match '^\d{1,12}$' -and [long]$r[2] -le [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) { $stale = $true }
+    }
+}
+if ($stale -and (Test-Path $retry) -and ((Get-Date) - (Get-Item -Force $retry).LastWriteTime).TotalMinutes -lt 2) { $stale = $false }
+if ($stale) {
+    # @() is load-bearing: a one-element array unrolls to a scalar.
+    $fresh = $null
+    try { $fresh = @(Read-CntUsage) } catch { $fresh = $null }
+    if ($fresh) {
+        $lines = $fresh
+        # tmp+move: two sessions refreshing at once must not interleave writes.
+        $tmpFile = "$cache.$PID.tmp"
+        try {
+            New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
+            Set-Content -Path $tmpFile -Value $lines
+            Move-Item -Force -Path $tmpFile -Destination $cache
+            Remove-Item -Force -ErrorAction SilentlyContinue $retry
+        } catch { Remove-Item -Force -ErrorAction SilentlyContinue $tmpFile }
+    } else {
+        try { New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null; Set-Content -Path $retry -Value '' } catch { }
+    }
 }
 if (-not $lines) { exit 0 }
 
@@ -119,8 +145,8 @@ function Invoke-SlSub([string]$S, [string]$Token, [string]$Rep) {
     return $S.Substring(0, $i) + $Rep + $S.Substring($i + $Token.Length)
 }
 
-$fmt       = Get-SlConf 'FORMAT' '{d%}% d {dr} | {w%}% w {wr}'
-$fmtSingle = Get-SlConf 'FORMAT_SINGLE' '{d%}% d {dr}'
+$fmt       = Get-SlConf 'FORMAT' '{d%} d {dr} | {w%} w {wr}'
+$fmtSingle = Get-SlConf 'FORMAT_SINGLE' '{d%} d {dr}'
 $timeFmt   = Get-SlConf 'TIME_FORMAT' '%H:%M'
 $dateFmt   = Get-SlConf 'DATE_FORMAT' '%d.%m'
 $todayWord = Get-SlConf 'TODAY' 'today'
@@ -130,15 +156,18 @@ $esc = [char]27
 $dColored = "${esc}[$(Get-SlColor $dPct)m${dPct}%${esc}[0m"
 $dResetStr = Format-SlReset $dReset
 
+# {d%}/{w%} already carry the '%'; old defaults added another ("86%%"),
+# so a saved "{d%}%" collapses to "{d%}".
 if ($null -ne $wPct) {
     $wColored = "${esc}[$(Get-SlColor $wPct)m${wPct}%${esc}[0m"
     $wResetStr = Format-SlReset $wReset
-    $out = $fmt
+    $out = Invoke-SlSub $fmt '{w%}%' '{w%}'
     $out = Invoke-SlSub $out '{w%}' $wColored
     $out = Invoke-SlSub $out '{wr}' $wResetStr
 } else {
     $out = $fmtSingle
 }
+$out = Invoke-SlSub $out '{d%}%' '{d%}'
 $out = Invoke-SlSub $out '{d%}' $dColored
 $out = Invoke-SlSub $out '{dr}' $dResetStr
 Write-Output $out
