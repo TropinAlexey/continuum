@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.6.2-brightgreen.svg" alt="version: 0.6.2"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.6.3-brightgreen.svg" alt="version: 0.6.3"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -64,7 +64,7 @@ irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | 
 - **Сеть.** Провайдер `anthropic` делает один `GET https://api.anthropic.com/api/oauth/usage` с OAuth-токеном Claude Code в заголовке `Authorization`. Это **недокументированный эндпоинт**, не публичный API, и он может измениться. Ответ кэшируется на 10 минут. Необязательный провайдер `spend` обращается к `https://api.anthropic.com/v1/billing/usage` с `ANTHROPIC_ADMIN_KEY`. Больше ничего с машины не уходит.
 - **Учётные данные.** Токен ищется в таком порядке: `$CLAUDE_CODE_OAUTH_TOKEN`, запись `Claude Code-credentials` в Keychain macOS, затем `~/.claude/.credentials.json`. Он уходит только на `api.anthropic.com` и нигде не сохраняется.
 - **Настройки Claude Code.** При старте сессии, если в `settings.json` нет `statusLine`, плагин копирует свой скрипт статус-бара в `~/.claude/hooks/statusline.sh` и добавляет запись `statusLine`, указывающую на него. Дальше он держит эту копию в актуальном состоянии. Чужой или твой собственный статус-бар не трогается. CLI-инсталлятор делает то же самое.
-- **Хуки.** `Stop` (предупреждение), `PreToolUse` (блокирует инструмент `Agent` только в экономном режиме, `CONTINUUM_FRUGAL=1`) и `SessionStart` (отчёт о resume, обслуживание статус-бара).
+- **Хуки.** `Stop` и `PostToolUse` (предупреждение, в конце хода и после каждого инструмента), `PreToolUse` (блокирует инструмент `Agent` только в экономном режиме, `CONTINUUM_FRUGAL=1`) и `SessionStart` (отчёт о resume, обслуживание статус-бара).
 - **Файлы.** Кэш, флаги, логи и конфиг лежат в `~/.local/state/continuum` (см. [Настройка](#настройка)). CLI-инсталлятор кладёт код в `~/.continuum`, а символическую ссылку на него — в каталог из `PATH`.
 - **Запуск без присмотра.** `continuum resume` запускает агента, когда никто не смотрит. Для Claude это `claude --continue -p "<задача>" --permission-mode acceptEdits`. Запуск происходит только по твоему выбору: вариант «сохранить и продолжить» или ручной вызов команды. Ставь узкую задачу и не направляй его на то, что не дал бы мержить незнакомцу.
 
@@ -80,7 +80,7 @@ irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | 
 
 Выбираешь «сохранить и продолжить»: агент коммитит работу, планирует свой запуск на после сброса и показывает PID. Ноутбук можно закрыть, сессия продолжится без тебя.
 
-> **Известное ограничение.** В Claude Code предупреждение проверяется в конце хода (`Stop`). Один очень длинный ход — сборки, параллельные субагенты, фоновые ревью — может пройти путь от «ниже порога» до лимита, не закончившись, и тогда предупреждение не придёт. Проверка внутри хода — следующая задача в планах.
+Проверка идёт в конце каждого хода и после каждого вызова инструмента, поэтому длинный ход со сборками, параллельными субагентами или фоновыми ревью не пересечёт порог незаметно. Посреди хода агент сначала доделывает текущий шаг и оставляет работу в целостном состоянии, а потом спрашивает тебя. Обе проверки делят ступени, так что каждая ступень по-прежнему срабатывает один раз. Внутри субагентов проверка молчит: там некого спросить.
 
 ## Использование
 
@@ -107,7 +107,7 @@ continuum не зависит от конкретного агента. Ядро
 
 | Агент | Предупреждение в сессии | Пресет resume | Статус |
 |---|---|---|---|
-| **Claude Code** | `Stop`-хук → `adapters/claude/` | `CONTINUUM_AGENT=claude` (по умолчанию) | Поддерживается, тестируется в CI |
+| **Claude Code** | хуки `Stop` + `PostToolUse` → `adapters/claude/` | `CONTINUUM_AGENT=claude` (по умолчанию) | Поддерживается, тестируется в CI |
 | Codex CLI, opencode, Cursor, Gemini CLI | адаптеры в планах | задай `CONTINUUM_RESUME_CMD` | Пока — `continuum check` / `continuum watch` |
 | Любой другой | `continuum check` из хука или `continuum watch` в отдельной панели | задай `CONTINUUM_RESUME_CMD` | Работает уже сейчас |
 
@@ -120,7 +120,7 @@ CONTINUUM_RESUME_CMD='opencode run "{prompt}"'  continuum resume 21:41 "$PWD" "f
 
 ## Как работает
 
-Агенты с хуками запускают хук после каждого хода. В Claude Code `Stop`-хук, который печатает `{"decision":"block","reason":"..."}`, отправляет reason обратно модели вместо завершения хода. Вот и весь трюк.
+Агенты с хуками запускают хук после каждого хода. В Claude Code `Stop`-хук, который печатает `{"decision":"block","reason":"..."}`, отправляет reason обратно модели вместо завершения хода. Вот и весь трюк. Хук `PostToolUse` делает то же посреди хода, через `additionalContext`.
 
 ```
 событие агента ──► adapters/<агент>/ ──► continuum check ──► провайдер
@@ -131,9 +131,10 @@ CONTINUUM_RESUME_CMD='opencode run "{prompt}"'  continuum resume 21:41 "$PWD" "f
 1. **Провайдер** (`providers/anthropic.sh`): `curl` к эндпоинту, печатает `5h 86.5 1783000000` (окно, процент, epoch сброса). Эти три колонки — весь контракт провайдера.
 2. **`continuum check`**: агент-нейтральное ядро предупреждения. Вызывает провайдера через 10-минутный кэш (кэшируются и успехи, и сбои), сравнивает результат со ступенями и печатает текст предупреждения или ничего. Флаг на сессию гарантирует, что каждая ступень срабатывает один раз.
 3. **Адаптер** (`adapters/claude/stop.sh`): превращает `Stop`-событие Claude в `continuum check --session … --agent claude`, а текст — в блокирующий JSON. Первым делом проверяет `stop_hook_active`, иначе будет бесконечный цикл.
-4. **Frugal gate** (`adapters/claude/frugal-gate.sh`): в экономном режиме (`CONTINUUM_FRUGAL=1`) блокирует вызовы `Agent` на уровне хука.
-5. **Скилл** (`skills/session-budget`): то, что предупреждение просит агента запустить. Показывает ситуацию и спрашивает тебя (в Claude Code через `AskUserQuestion`). Никогда не решает за тебя.
-6. **`continuum resume`**: планирует headless-команду агента на после сброса. Выбирает лучший планировщик ОС, не даёт машине заснуть и уведомляет, когда запуск закончится.
+4. **Проверка внутри хода** (`adapters/claude/tool-check.sh`): после каждого вызова инструмента — тот же `continuum check`, переданный Claude через `additionalContext`. Кэш не пускает его в сеть, к каждому вызову он добавляет около 0,1 с. Внутри субагентов молчит (вызовы с `agent_id`).
+5. **Frugal gate** (`adapters/claude/frugal-gate.sh`): в экономном режиме (`CONTINUUM_FRUGAL=1`) блокирует вызовы `Agent` на уровне хука.
+6. **Скилл** (`skills/session-budget`): то, что предупреждение просит агента запустить. Показывает ситуацию и спрашивает тебя (в Claude Code через `AskUserQuestion`). Никогда не решает за тебя.
+7. **`continuum resume`**: планирует headless-команду агента на после сброса. Выбирает лучший планировщик ОС, не даёт машине заснуть и уведомляет, когда запуск закончится.
 
 ## Resume
 
@@ -198,6 +199,11 @@ macOS, Linux, FreeBSD/OpenBSD/NetBSD, Windows (Git Bash или PowerShell). POSI
       "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/adapters/claude/stop.ps1\"",
       "shell": "powershell"
     }]}],
+    "PostToolUse": [{ "hooks": [{
+      "type": "command",
+      "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/adapters/claude/tool-check.ps1\"",
+      "shell": "powershell"
+    }]}],
     "PreToolUse": [{ "hooks": [{
       "type": "command",
       "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/adapters/claude/frugal-gate.ps1\"",
@@ -230,7 +236,7 @@ macOS, Linux, FreeBSD/OpenBSD/NetBSD, Windows (Git Bash или PowerShell). POSI
 
 ## Если что-то не так
 
-**Нет предупреждения на 80%.** Сначала проверь, что плагин включён: `/plugin` должен показывать `continuum`. Потом — что вместо него не подключена старая копия: в `settings.json` не должно быть `Stop`-хука на `token-budget-check.sh` (остаток с тех времён, когда плагин ещё не назывался continuum). Если и то и другое в порядке, вспомни про [известное ограничение](#что-происходит): проверка идёт в конце хода.
+**Нет предупреждения на 80%.** Сначала проверь, что плагин включён: `/plugin` должен показывать `continuum`. Потом — что вместо него не подключена старая копия: в `settings.json` не должно быть `Stop`-хука на `token-budget-check.sh` (остаток с тех времён, когда плагин ещё не назывался continuum). Если и то и другое в порядке, запусти `sh tests/run.sh`: если он проходит, проблема в настройке, а не в коде.
 
 **`usage endpoint unavailable`.** Нет сети, сработал рейт-лимит (сбои тоже кэшируются, подожди 10 минут) или истёк токен. Перелогинься в Claude Code.
 
@@ -243,8 +249,8 @@ macOS, Linux, FreeBSD/OpenBSD/NetBSD, Windows (Git Bash или PowerShell). POSI
 ## Участие
 
 ```
-sh tests/run.sh          # 124 теста, mock-провайдер, без сети (проходит и под dash)
-pwsh tests/run.ps1       # 102 теста, та же сюита для PowerShell
+sh tests/run.sh          # 137 тестов, mock-провайдер, без сети (проходит и под dash)
+pwsh tests/run.ps1       # 114 тестов, та же сюита для PowerShell
 ```
 
 Каждая правка `.sh` дублируется в `.ps1`, с тестами в обе сюиты. Пригодится помощь с провайдером для другого бюджета (OpenAI, Gemini: см. [docs/writing-a-provider.md](docs/writing-a-provider.md)) и с адаптером для другого агента ([docs/harnesses.md](docs/harnesses.md)).

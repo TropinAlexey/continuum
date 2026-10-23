@@ -297,6 +297,28 @@ out=$(printf '{"tool_name":"Read"}' | CONTINUUM_FRUGAL=1 sh "$ROOT/adapters/clau
 out=$(printf '{"tool_name":"Agent"}' | sh "$ROOT/adapters/claude/frugal-gate.sh" 2>/dev/null)
 [ -z "$out" ] && ok "no frugal allows Agent" || bad "no frugal allows Agent" "$out"
 
+echo "mid-turn check:"
+# PostToolUse: the same warning as Stop, as additionalContext, sharing tiers and flags.
+tool() { # tool <state dir> <stdin json> -> stdout
+    printf '%s' "$2" | CONTINUUM_STATE_DIR="$TMP/$1" sh "$ROOT/adapters/claude/tool-check.sh" 2>/dev/null || true
+}
+out=$(tool mt '{"session_id":"mt","tool_name":"Bash"}')
+check "mid-turn uses PostToolUse"      '"hookEventName":"PostToolUse"' "$out"
+check "mid-turn sends additionalContext" '"additionalContext":"Mid-turn usage check.' "$out"
+check "mid-turn keeps claude text"     'use AskUserQuestion' "$out"
+case "$out" in *'"decision"'*) bad "mid-turn never blocks" "$out" ;; *) ok "mid-turn never blocks" ;; esac
+[ -z "$(tool mt '{"session_id":"mt","tool_name":"Bash"}')" ] && ok "mid-turn fires once per tier" || bad "mid-turn fires once per tier" "warned twice"
+[ -z "$(hook mt '{"session_id":"mt"}')" ] && ok "Stop silent after mid-turn warned" || bad "Stop silent after mid-turn warned" "warned twice"
+[ -z "$(hook mts '{"session_id":"mts"}' >/dev/null; tool mts '{"session_id":"mts"}')" ] && ok "mid-turn silent after Stop warned" || bad "mid-turn silent after Stop warned" "warned twice"
+out=$(tool mta '{"session_id":"mta","agent_id":"a1","agent_type":"Explore"}')
+[ -z "$out" ] && ok "mid-turn silent inside a subagent" || bad "mid-turn silent inside a subagent" "$out"
+check "subagent does not use up the tier" "Mid-turn usage check" "$(tool mta '{"session_id":"mta"}')"
+[ -z "$(CONTINUUM_MOCK="46.0 10.0" tool mtu '{"session_id":"mtu"}')" ] && ok "mid-turn silent under threshold" || bad "mid-turn silent under threshold" "warned"
+[ -z "$(CONTINUUM_OFF=1 tool mto '{"session_id":"mto"}')" ] && ok "mid-turn respects CONTINUUM_OFF" || bad "mid-turn respects CONTINUUM_OFF" "warned"
+printf '{"session_id":"mtg"}' | CONTINUUM_STATE_DIR=/proc/nonexistent sh "$ROOT/adapters/claude/tool-check.sh" >/dev/null 2>&1 \
+    && ok "mid-turn exit 0 on unwritable state dir" || bad "mid-turn exit 0 on unwritable state dir" "non-zero exit"
+grep -q 'adapters/claude/tool-check.sh' "$ROOT/hooks/hooks.json" && ok "hooks.json wires the mid-turn check" || bad "hooks.json wires the mid-turn check" "missing"
+
 echo "multi-provider:"
 out=$(CONTINUUM_PROVIDER=mock,mock sh "$ROOT/bin/continuum" status 2>&1)
 check "multi-provider status works" "5 hours" "$out"

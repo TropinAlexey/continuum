@@ -24,6 +24,16 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/adapters/claude/tool-check.sh\""
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "hooks": [

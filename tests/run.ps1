@@ -358,6 +358,34 @@ Remove-Item Env:CONTINUUM_FRUGAL
 $out = '{"tool_name":"Agent"}' | & pwsh -NoProfile -File (Join-Path $root 'adapters/claude/frugal-gate.ps1') 2>$null
 if (-not ($out -join '')) { Ok "no frugal allows Agent" } else { Bad "no frugal allows Agent" ($out -join '') }
 
+Write-Host "mid-turn check:"
+# PostToolUse: the same warning as Stop, as additionalContext, sharing tiers and flags.
+function Tool ($cfg, $stdin) {
+    $env:CONTINUUM_STATE_DIR = Join-Path $tmp $cfg
+    $out = $stdin | & pwsh -NoProfile -File (Join-Path $root 'adapters/claude/tool-check.ps1') 2>$null
+    return ($out -join '')
+}
+$out = Tool 'mt' '{"session_id":"mt","tool_name":"Bash"}'
+Check "mid-turn uses PostToolUse" '"hookEventName":"PostToolUse"' $out
+Check "mid-turn sends additionalContext" '"additionalContext":"Mid-turn usage check.' $out
+Check "mid-turn keeps claude text" 'use AskUserQuestion' $out
+if ($out -notmatch '"decision"') { Ok "mid-turn never blocks" } else { Bad "mid-turn never blocks" $out }
+if (-not (Tool 'mt' '{"session_id":"mt","tool_name":"Bash"}')) { Ok "mid-turn fires once per tier" } else { Bad "mid-turn fires once per tier" "warned twice" }
+if (-not (Hook 'mt' '{"session_id":"mt"}')) { Ok "Stop silent after mid-turn warned" } else { Bad "Stop silent after mid-turn warned" "warned twice" }
+Hook 'mts' '{"session_id":"mts"}' | Out-Null
+if (-not (Tool 'mts' '{"session_id":"mts"}')) { Ok "mid-turn silent after Stop warned" } else { Bad "mid-turn silent after Stop warned" "warned twice" }
+$out = Tool 'mta' '{"session_id":"mta","agent_id":"a1","agent_type":"Explore"}'
+if (-not $out) { Ok "mid-turn silent inside a subagent" } else { Bad "mid-turn silent inside a subagent" $out }
+Check "subagent does not use up the tier" "Mid-turn usage check" (Tool 'mta' '{"session_id":"mta"}')
+$env:CONTINUUM_MOCK = '46.0 10.0'
+if (-not (Tool 'mtu' '{"session_id":"mtu"}')) { Ok "mid-turn silent under threshold" } else { Bad "mid-turn silent under threshold" "warned" }
+Remove-Item Env:CONTINUUM_MOCK
+$env:CONTINUUM_OFF = '1'
+if (-not (Tool 'mto' '{"session_id":"mto"}')) { Ok "mid-turn respects CONTINUUM_OFF" } else { Bad "mid-turn respects CONTINUUM_OFF" "warned" }
+Remove-Item Env:CONTINUUM_OFF
+if ((Get-Content -Raw (Join-Path $root 'hooks/hooks.json')).Contains('adapters/claude/tool-check.sh')) { Ok "hooks.json wires the mid-turn check" } else { Bad "hooks.json wires the mid-turn check" "missing" }
+$env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
+
 Write-Host "multi-provider:"
 $env:CONTINUUM_PROVIDER = 'mock,mock'
 Check "multi-provider status works" "5 hours" ((Invoke-Continuum status) -join "`n")

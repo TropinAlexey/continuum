@@ -19,7 +19,7 @@
 
 1. **Provider** (`providers/anthropic.sh`) — `curl` к usage-endpoint, печатает `5h 86.5 1783000000` (окно, %, epoch ресета). Весь контракт провайдера — эти 3 колонки. Свои провайдеры: `docs/writing-a-provider.md`.
 2. **`continuum check [--session ID] [--agent NAME]`** — агент-нейтральное ядро предупреждения: 10-мин кэш, тиры, флаги, текст. Пусто = молчать, иначе одна строка текста; exit 0 всегда (кроме плохих аргументов). Тиры: `80→90→95→99` (основное окно), `70→85→95` (weekly). Каждый тир один раз, пере-вооружается при спаде usage. Формулировка «как спросить» по агенту — `cnt_ask_hint`.
-3. **Адаптер Claude** (`adapters/claude/`): `stop.sh` (Stop-событие → `check` → blocking JSON), `frugal-gate.sh` (в `CONTINUUM_FRUGAL=1` блокирует `Agent`), `statusline.sh`, `setup-statusline.sh`, `resume-report.sh` (+ `.ps1`). `hooks/*.sh|ps1` — форвардеры для старых конфигов, удалить в v0.7.
+3. **Адаптер Claude** (`adapters/claude/`): `stop.sh` (Stop-событие → `check` → blocking JSON), `tool-check.sh` (PostToolUse → `check` → `additionalContext`, посреди хода; молчит в сабагентах по `agent_id`; флаги общие со Stop), `frugal-gate.sh` (в `CONTINUUM_FRUGAL=1` блокирует `Agent`), `statusline.sh`, `setup-statusline.sh`, `resume-report.sh` (+ `.ps1`). `hooks/*.sh|ps1` — форвардеры для старых конфигов, удалить в v0.7.
 4. **Skill** (`skills/session-budget/SKILL.md`) — что делать при предупреждении: показать ситуацию, спросить пользователя через AskUserQuestion (на его языке), никогда не решать за него. Опции: wrap up / finish batch / save+resume / frugal / cheap-only / ignore.
 5. **`continuum resume`** — планирует headless-команду агента после ресета: `CONTINUUM_RESUME_CMD` → пресет `CONTINUUM_AGENT` (по умолчанию `claude`; пресеты других агентов появятся с их адаптерами) → ошибка. Планировщик по ОС: launchd / systemd-run / daemon(8) / detached process / nohup-fallback. Вейклок + нотификация.
 6. **Состояние** — `CNT_STATE`: `$CONTINUUM_STATE_DIR` → `$XDG_STATE_HOME/continuum` → `~/.local/state/continuum` (одинаково в sh и ps1). НЕ `~/.continuum` — там код от инсталлятора (`CONTINUUM_HOME`). Разовая миграция из `~/.claude` (копирует conf/логи/провайдеры, не кэш; маркер `.migrated`). `$CNT_STATE/root` — указатель на код для скриптов без окружения (копия statusline в `~/.claude/hooks/`). Токен Claude (`~/.claude/.credentials.json`) ищет провайдер `anthropic`, не ядро.
@@ -43,8 +43,8 @@
 ## Команды
 
 ```sh
-sh tests/run.sh          # 124 теста, mock, без сети (эталон; проходит и под dash)
-pwsh tests/run.ps1       # 102 теста, та же сюита для PowerShell
+sh tests/run.sh          # 137 тестов, mock, без сети (эталон; проходит и под dash)
+pwsh tests/run.ps1       # 114 тестов, та же сюита для PowerShell
 continuum status         # 5h 86.5% resets at 21:40 + weekly строка
 continuum reset          # HH:MM ресета (+90s, для планировщика)
 continuum estimate       # сколько осталось at this pace
@@ -54,7 +54,9 @@ continuum check --session ID --agent claude  # ядро предупрежден
 continuum resume "$(continuum reset)" "$PWD" "конкретная задача"  # NEVER generic "continue"
 ```
 
-## Текущее состояние (2026-10-02)
+## Текущее состояние (2026-10-23)
+
+- **v0.6.3 — проверка порога внутри хода**: `adapters/claude/tool-check.sh|ps1` на `PostToolUse` → `continuum check` → `hookSpecificOutput.additionalContext` (не блокирует). Флаги общие со Stop, молчит в сабагентах (`agent_id`), ~0.1 с на вызов при свежем кэше. Проверено вживую через `claude -p --plugin-dir .` с mock. Коммит прямо в `main` по просьбе пользователя, тег — после зелёного CI. **Тесты: sh 137/137 (и под dash), ps 114/114.**
 
 - **v0.6.2 — фикс v0.6.1**: проверка устаревшего кэша (после ресета / старше 10 мин) в `statusline.sh` стояла за 30-сек гейтом `find -mmin -0.5` — кэш, записанный за <30с до ресета, после ресета показывал старые цифры. Локально не ловилось: на macOS `find` = `bfs`, он не понимает дробный `-mmin` (гейт всегда открыт); на CI GNU find падал в 4 тестах. **Урок: мержить только при зелёном CI.**
 - **v0.6.1 — патч статус-бара**: устаревший кэш (нет / старше 10 мин / после ресета) обновляется синхронно до первой отрисовки — новая сессия сразу показывает актуальные цифры; после неудачи — маркер `.continuum-cache-<prov>.retry`, 2 мин бэкофф (иначе оффлайн вешал бы каждую отрисовку до 15с). Плюс фикс двойного `%` (`86%%`) и атомарная запись кэша в `.ps1`. **Тесты: sh 124/124 (и под dash), ps 102/102**, shellcheck чист.
@@ -69,13 +71,14 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
 - 24.09: agent-agnostic, подпроект 1 (ядро + Claude-адаптер), 114/91 тестов, релиз v0.6.0.
 - 30.09: v0.6.1 — статус-бар свежий с первой отрисовки (+бэкофф при сбое), фикс `86%%`, ревью безопасности, 124/102 тестов.
 - 02.10: merge PR #3 с красным CI → v0.6.2: stale-проверка перед 30-сек гейтом (GNU find), 124/102.
+- 23.10: два отзыва «лимит внутри хода» → миграция машины на плагин, GitHub Release v0.6.2, README-рерайт (PR #5, «What it touches»), проверка порога внутри хода (`tool-check.sh`, PostToolUse), 137/114.
 
 ## Дальше (беклог, по приоритету)
 
 0. **Из feedback 2026-10-23 (лимит внутри хода, `feedback/2026-10-23-claude-limit-{mid-turn,long-turn}.md`, два случая подряд)**:
-   - **Проверка порога внутри хода, а не только на Stop** (главное): хук на инструменты (`PostToolUse`/`PreToolUse`, matcher `*`) зовёт `continuum check` — тиры и флаги те же, сеть не чаще 10-мин кэша. Мягко: `additionalContext` «5h = N%, заверши шаг и зафиксируй состояние» (проверить по доке, какое событие Claude Code принимает `additionalContext`). Для `Agent` выше порога — жёстче: блок/«по одному», параллельные сабагенты сжигают остаток разом. Лимит наступал и с сабагентами, и в одном длинном ходе без них.
+   - ~~Проверка порога внутри хода~~ — сделано 2026-10-23 (`tool-check.sh`, PostToolUse). Не сделано: отдельный жёсткий блок `Agent` выше порога — посмотреть по отзывам, хватает ли мягкого предупреждения.
    - **`continuum doctor`**: подключённый коммит, включён ли плагин (`enabledPlugins`), legacy-хуки (`token-budget-check.sh`, `~/.claude/lib/usage.sh`), дрейф копии statusline + одна команда миграции. Связано с п.4.
-   - **Auto-resume по 429 внутри хода**: исследовать, есть ли у Claude Code хук-событие на ошибку API/лимит, чтобы планировать resume по `resets HH:MM`.
+   - **Auto-resume по 429 внутри хода**: у Claude Code есть событие `StopFailure` (matcher `rate_limit`), без decision control — спросить пользователя нельзя. Вариант: по нему писать заметку/уведомление «лимит, сброс в HH:MM, `continuum resume …`», а не планировать молча (resume без согласия нарушает принцип «не решать за пользователя»).
    - **Мусор `*.tmp`**: фоновый refresh в `statusline.sh` оставляет 0-байтный `$cache.$$.tmp`, если процесс убит до `mv`. Чистить tmp старше N мин при отрисовке (sh + ps1 + тесты).
 1. **Адаптер Codex CLI** (подпроект 2) — своя спека по актуальной доке Codex: хуки, соблюдает ли `block`, пресет resume, строка в `cnt_ask_hint`.
 2. **Адаптер opencode** (подпроект 3) — JS-плагин, зовущий `continuum check`.

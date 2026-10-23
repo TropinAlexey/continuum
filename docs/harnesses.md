@@ -64,7 +64,7 @@ All the logic lives in `continuum check`; an adapter only translates.
 
 | Harness | Warning | Interactive question | Status |
 |---|---|---|---|
-| **Claude Code** | yes | yes | Supported: `adapters/claude/`. `Stop` hook returning `{"decision":"block","reason":...}`. Tested in CI on Linux, macOS, Windows. |
+| **Claude Code** | yes | yes | Supported: `adapters/claude/`. `Stop` hook returning `{"decision":"block","reason":...}`, plus a `PostToolUse` hook returning the same text as `hookSpecificOutput.additionalContext` in the middle of a turn. Tested in CI on Linux, macOS, Windows. |
 | **Codex CLI** | probably | unknown | Codex has lifecycle hooks including `Stop`, and its config accepts the same `hooks.json` schema. Whether it honours a `block` decision is undocumented. **Untested — try it and tell us.** |
 | **Anything else** | yes, via `continuum watch` | no | The watcher tells *you*. You decide, and you tell the agent. |
 
