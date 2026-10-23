@@ -1,5 +1,6 @@
 {
   "name": "continuum",
+  "description": "continuum: see the usage limit coming, decide what to do with what is left, and auto-resume after the reset.",
   "owner": {
     "name": "Alexey Tropin",
     "url": "https://github.com/TropinAlexey"
