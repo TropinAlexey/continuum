@@ -278,6 +278,8 @@ if [ -n "$wl_pf" ]; then
     wl_pid=$(cat "$wl_pf")
     kill -0 "$wl_pid" 2>/dev/null && ok "wakelock process alive" || bad "wakelock process alive" "dead"
     . "$ROOT/lib/core.sh" && cnt_wakelock_stop "$wl_pf"
+    # SIGTERM is asynchronous: give the process up to 2s to exit before calling it alive.
+    i=0; while kill -0 "$wl_pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i+1)); done
     kill -0 "$wl_pid" 2>/dev/null && bad "wakelock stopped" "still alive" || ok "wakelock stopped"
     [ ! -f "$wl_pf" ] && ok "wakelock pidfile cleaned" || bad "wakelock pidfile cleaned" "still exists"
 else
