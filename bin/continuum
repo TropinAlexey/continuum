@@ -83,7 +83,11 @@ cmd_reset() {
 # NB: not ${VAR:-default} - the `}` inside `{prompt}` would close the expansion early.
 cnt_resume_preset() {
     case "$1" in
-        claude) printf '%s' 'claude --continue -p "{prompt}" --permission-mode acceptEdits' ;;
+        claude)   printf '%s' 'claude --continue -p "{prompt}" --permission-mode acceptEdits' ;;
+        codex)    printf '%s' 'codex exec resume --last -c sandbox_mode=workspace-write "{prompt}"' ;;
+        gemini)   printf '%s' 'gemini --resume latest --approval-mode auto_edit -p "{prompt}"' ;;
+        cursor)   printf '%s' 'agent -p --continue "{prompt}"' ;;
+        opencode) printf '%s' 'opencode run --continue "{prompt}"' ;;
         *) return 1 ;;
     esac
 }

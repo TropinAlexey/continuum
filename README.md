@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.6.3-brightgreen.svg" alt="version: 0.6.3"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.0-brightgreen.svg" alt="version: 0.7.0"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -92,14 +92,19 @@ The core (`bin/`, `lib/`, `providers/`) never asks which agent is calling. Each 
 
 | Agent | In-session warning | Resume preset | Status |
 |---|---|---|---|
-| **Claude Code** | [adapter](#claude-code) | `CONTINUUM_AGENT=claude` (default) | Supported, tested in CI |
-| Codex CLI, opencode, Cursor, Gemini CLI | adapters planned | set `CONTINUUM_RESUME_CMD` | Use `continuum check` / `continuum watch` meanwhile |
+| **Claude Code** | [adapter](#claude-code), plugin | `CONTINUUM_AGENT=claude` (default) | Supported, run live, tested in CI |
+| **Codex CLI** | [adapter](#codex-cli), `hooks.json` | `CONTINUUM_AGENT=codex` | New: tested in CI, not yet run live |
+| **Gemini CLI** | [adapter](#gemini-cli), `settings.json` | `CONTINUUM_AGENT=gemini` | New: tested in CI, not yet run live |
+| **Cursor** | [adapter](#cursor), `hooks.json` | `CONTINUUM_AGENT=cursor` | New: tested in CI, not yet run live |
+| **opencode** | [adapter](#opencode), JS plugin | `CONTINUUM_AGENT=opencode` | New: tested in CI, not yet run live |
 | Anything else | `continuum check` from a hook, or `continuum watch` in a spare pane | set `CONTINUUM_RESUME_CMD` | Works today |
 
 ```sh
-CONTINUUM_RESUME_CMD='codex exec "{prompt}"'    continuum resume 21:41 "$PWD" "finish the tests"
-CONTINUUM_RESUME_CMD='opencode run "{prompt}"'  continuum resume 21:41 "$PWD" "finish the tests"
+CONTINUUM_AGENT=codex continuum resume 21:41 "$PWD" "finish the tests"
+CONTINUUM_RESUME_CMD='myagent run "{prompt}"' continuum resume 21:41 "$PWD" "finish the tests"
 ```
+
+"Tested in CI" means each adapter's replies are checked against the agent's documented hook protocol. "Run live" means a real session of that agent received the warning. If you run one live, tell us how it went (an issue or a PR to [docs/harnesses.md](docs/harnesses.md)).
 
 The agent and the provider are independent: a Codex session can watch the Anthropic window, and the other way round. See [docs/harnesses.md](docs/harnesses.md) for what is tested and how to write an adapter.
 
@@ -154,7 +159,7 @@ macOS, Linux, FreeBSD/OpenBSD/NetBSD, Windows (Git Bash or PowerShell). POSIX `s
 | `CONTINUUM_THRESHOLD_7D` | `70` | Weekly window threshold. |
 | `CONTINUUM_TIERS_7D` | `70 85 95` | Weekly tiers. |
 | `CONTINUUM_PROVIDER` | `anthropic` | Provider(s), comma-separated. |
-| `CONTINUUM_AGENT` | `claude` | Agent: picks the `resume` preset and the wording of `continuum check` (`generic` when unset there). |
+| `CONTINUUM_AGENT` | `claude` | Agent: `claude`, `codex`, `gemini`, `cursor` or `opencode`. Picks the `resume` preset and the wording of `continuum check` (`generic` when unset there). |
 | `CONTINUUM_RESUME_CMD` | preset for the agent | Agent command for `resume`. `{prompt}` is the task. Wins over the preset. |
 | `CONTINUUM_DRY_RUN` | — | `resume` prints the plan instead of scheduling it. |
 | `CONTINUUM_OFF` | — | Turns the warning off (`continuum check` and every adapter hook). |
@@ -248,11 +253,27 @@ continuum statusline reset              # back to defaults
 
 **Uninstall:** `/plugin uninstall continuum`, then `rm -f ~/.claude/hooks/statusline.sh` and remove `"statusLine"` from `~/.claude/settings.json`.
 
+## Codex CLI
+
+The adapter lives in [`adapters/codex/`](adapters/codex/README.md): a `Stop` hook (`decision: block`, so Codex continues and asks you) and a `PostToolUse` hook (`additionalContext`, in the middle of a turn). It changes nothing in Codex's config by itself: add the two hooks to `~/.codex/hooks.json` as the adapter's README shows, then approve them in `/hooks`. Codex runs a hook only once you trust it, and again after each update. Resume preset: `codex exec resume --last -c sandbox_mode=workspace-write "<task>"`.
+
+## Gemini CLI
+
+The adapter lives in [`adapters/gemini/`](adapters/gemini/README.md): an `AfterAgent` hook (`decision: deny`, so Gemini sends the warning back as a new prompt) and an `AfterTool` hook (`additionalContext`). It changes nothing in Gemini's config by itself: add the two hooks to `~/.gemini/settings.json` as the adapter's README shows. Resume preset: `gemini --resume latest --approval-mode auto_edit -p "<task>"`.
+
+## Cursor
+
+The adapter lives in [`adapters/cursor/`](adapters/cursor/README.md): a `stop` hook (`followup_message`, sent as the next user message) and a `postToolUse` hook (`additional_context`). It changes nothing in Cursor's config by itself: add the two hooks to `~/.cursor/hooks.json` as the adapter's README shows. Resume preset: `agent -p --continue "<task>"`. Without `--force` the headless agent only proposes changes. To let it change files and run commands unattended, opt in yourself: `CONTINUUM_RESUME_CMD='agent -p --force --continue "{prompt}"'`, with the same care as any unattended run.
+
+## opencode
+
+The adapter is a plugin, [`adapters/opencode/continuum.js`](adapters/opencode/README.md). On `session.idle` it sends the warning to the session as a prompt; after each tool call it appends it to the tool output. Install it with a symlink into `~/.config/opencode/plugins/`, as the adapter's README shows. It runs `continuum check` and nothing else. Resume preset: `opencode run --continue "<task>"`.
+
 ## Contributing
 
 ```
-sh tests/run.sh          # 137 tests, mock provider, no network (also passes under dash)
-pwsh tests/run.ps1       # 114 tests, the same suite for PowerShell
+sh tests/run.sh          # 160 tests, mock provider, no network (also passes under dash)
+pwsh tests/run.ps1       # 136 tests, the same suite for PowerShell
 ```
 
 Every `.sh` change has a matching `.ps1` change, with tests in both suites. Help is welcome with a provider for another budget (OpenAI, Gemini: see [docs/writing-a-provider.md](docs/writing-a-provider.md)) and an adapter for another agent ([docs/harnesses.md](docs/harnesses.md)).

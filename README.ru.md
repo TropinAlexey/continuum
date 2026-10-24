@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.6.3-brightgreen.svg" alt="version: 0.6.3"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.0-brightgreen.svg" alt="version: 0.7.0"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -92,14 +92,19 @@ continuum resume "$(continuum reset)" "$PWD" "доделать тесты Docume
 
 | Агент | Предупреждение в сессии | Пресет resume | Статус |
 |---|---|---|---|
-| **Claude Code** | [адаптер](#claude-code) | `CONTINUUM_AGENT=claude` (по умолчанию) | Поддерживается, тестируется в CI |
-| Codex CLI, opencode, Cursor, Gemini CLI | адаптеры в планах | задай `CONTINUUM_RESUME_CMD` | Пока — `continuum check` / `continuum watch` |
+| **Claude Code** | [адаптер](#claude-code), плагин | `CONTINUUM_AGENT=claude` (по умолчанию) | Поддерживается, проверен вживую, тестируется в CI |
+| **Codex CLI** | [адаптер](#codex-cli), `hooks.json` | `CONTINUUM_AGENT=codex` | Новый: тесты в CI, вживую ещё не запускался |
+| **Gemini CLI** | [адаптер](#gemini-cli), `settings.json` | `CONTINUUM_AGENT=gemini` | Новый: тесты в CI, вживую ещё не запускался |
+| **Cursor** | [адаптер](#cursor), `hooks.json` | `CONTINUUM_AGENT=cursor` | Новый: тесты в CI, вживую ещё не запускался |
+| **opencode** | [адаптер](#opencode), JS-плагин | `CONTINUUM_AGENT=opencode` | Новый: тесты в CI, вживую ещё не запускался |
 | Любой другой | `continuum check` из хука или `continuum watch` в отдельной панели | задай `CONTINUUM_RESUME_CMD` | Работает уже сейчас |
 
 ```sh
-CONTINUUM_RESUME_CMD='codex exec "{prompt}"'    continuum resume 21:41 "$PWD" "finish the tests"
-CONTINUUM_RESUME_CMD='opencode run "{prompt}"'  continuum resume 21:41 "$PWD" "finish the tests"
+CONTINUUM_AGENT=codex continuum resume 21:41 "$PWD" "finish the tests"
+CONTINUUM_RESUME_CMD='myagent run "{prompt}"' continuum resume 21:41 "$PWD" "finish the tests"
 ```
+
+«Тесты в CI» — ответы каждого адаптера сверяются с документированным протоколом хуков агента. «Проверен вживую» — настоящая сессия этого агента получила предупреждение. Если запустишь какой-то вживую, расскажи, как прошло (issue или PR в [docs/harnesses.md](docs/harnesses.md)).
 
 Агент и провайдер независимы: сессия Codex может следить за окном Anthropic, и наоборот. Что проверено и как написать адаптер — в [docs/harnesses.md](docs/harnesses.md).
 
@@ -154,7 +159,7 @@ macOS, Linux, FreeBSD/OpenBSD/NetBSD, Windows (Git Bash или PowerShell). POSI
 | `CONTINUUM_THRESHOLD_7D` | `70` | Порог недельного окна. |
 | `CONTINUUM_TIERS_7D` | `70 85 95` | Ступени недельного окна. |
 | `CONTINUUM_PROVIDER` | `anthropic` | Провайдер(ы), через запятую. |
-| `CONTINUUM_AGENT` | `claude` | Агент: выбирает пресет `resume` и формулировку `continuum check` (там без переменной — `generic`). |
+| `CONTINUUM_AGENT` | `claude` | Агент: `claude`, `codex`, `gemini`, `cursor` или `opencode`. Выбирает пресет `resume` и формулировку `continuum check` (там без переменной — `generic`). |
 | `CONTINUUM_RESUME_CMD` | пресет агента | Команда агента для `resume`. `{prompt}` — задача. Важнее пресета. |
 | `CONTINUUM_DRY_RUN` | — | `resume` печатает план вместо планирования. |
 | `CONTINUUM_OFF` | — | Отключает предупреждение (`continuum check` и все хуки адаптеров). |
@@ -248,11 +253,27 @@ continuum statusline reset              # вернуть настройки по
 
 **Удаление:** `/plugin uninstall continuum`, затем `rm -f ~/.claude/hooks/statusline.sh` и убрать `"statusLine"` из `~/.claude/settings.json`.
 
+## Codex CLI
+
+Адаптер лежит в [`adapters/codex/`](adapters/codex/README.md): хук `Stop` (`decision: block` — Codex продолжает и спрашивает тебя) и хук `PostToolUse` (`additionalContext`, посреди хода). Сам он ничего в конфиге Codex не меняет: добавь оба хука в `~/.codex/hooks.json`, как показано в README адаптера, и одобри их в `/hooks`. Codex запускает хук только после одобрения, и заново после каждого обновления. Пресет resume: `codex exec resume --last -c sandbox_mode=workspace-write "<задача>"`.
+
+## Gemini CLI
+
+Адаптер лежит в [`adapters/gemini/`](adapters/gemini/README.md): хук `AfterAgent` (`decision: deny` — Gemini возвращает предупреждение как новый промпт) и хук `AfterTool` (`additionalContext`). Сам он ничего в конфиге Gemini не меняет: добавь оба хука в `~/.gemini/settings.json`, как показано в README адаптера. Пресет resume: `gemini --resume latest --approval-mode auto_edit -p "<задача>"`.
+
+## Cursor
+
+Адаптер лежит в [`adapters/cursor/`](adapters/cursor/README.md): хук `stop` (`followup_message` — уходит следующим сообщением пользователя) и хук `postToolUse` (`additional_context`). Сам он ничего в конфиге Cursor не меняет: добавь оба хука в `~/.cursor/hooks.json`, как показано в README адаптера. Пресет resume: `agent -p --continue "<задача>"`. Без `--force` headless-агент только предлагает изменения. Чтобы он менял файлы и запускал команды без присмотра, включи это сам: `CONTINUUM_RESUME_CMD='agent -p --force --continue "{prompt}"'` — с той же осторожностью, что и любой запуск без присмотра.
+
+## opencode
+
+Адаптер — плагин [`adapters/opencode/continuum.js`](adapters/opencode/README.md). На `session.idle` он отправляет предупреждение в сессию как промпт, после каждого вызова инструмента дописывает его к выводу инструмента. Ставится символической ссылкой в `~/.config/opencode/plugins/`, как показано в README адаптера. Он запускает только `continuum check`. Пресет resume: `opencode run --continue "<задача>"`.
+
 ## Участие
 
 ```
-sh tests/run.sh          # 137 тестов, mock-провайдер, без сети (проходит и под dash)
-pwsh tests/run.ps1       # 114 тестов, та же сюита для PowerShell
+sh tests/run.sh          # 160 тестов, mock-провайдер, без сети (проходит и под dash)
+pwsh tests/run.ps1       # 136 тестов, та же сюита для PowerShell
 ```
 
 Каждая правка `.sh` дублируется в `.ps1`, с тестами в обе сюиты. Пригодится помощь с провайдером для другого бюджета (OpenAI, Gemini: см. [docs/writing-a-provider.md](docs/writing-a-provider.md)) и с адаптером для другого агента ([docs/harnesses.md](docs/harnesses.md)).

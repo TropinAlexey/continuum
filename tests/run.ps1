@@ -64,6 +64,10 @@ if (Test-Path Env:CONTINUUM_RESUME_CMD) { Remove-Item Env:CONTINUUM_RESUME_CMD }
 
 $env:CONTINUUM_AGENT = 'claude'
 Check "agent preset claude" 'claude --continue' (Dry $null 'x')
+foreach ($pair in @(@('codex', 'codex exec resume --last'), @('gemini', 'gemini --resume latest'), @('cursor', 'agent -p --continue'), @('opencode', 'opencode run --continue'))) {
+    $env:CONTINUUM_AGENT = $pair[0]
+    Check "agent preset $($pair[0])" $pair[1] (Dry $null 'x')
+}
 $env:CONTINUUM_AGENT = 'nope'
 $env:CONTINUUM_DRY_RUN = '1'
 Invoke-Continuum resume '23:59' $root 'x' *>$null
@@ -384,6 +388,49 @@ $env:CONTINUUM_OFF = '1'
 if (-not (Tool 'mto' '{"session_id":"mto"}')) { Ok "mid-turn respects CONTINUUM_OFF" } else { Bad "mid-turn respects CONTINUUM_OFF" "warned" }
 Remove-Item Env:CONTINUUM_OFF
 if ((Get-Content -Raw (Join-Path $root 'hooks/hooks.json')).Contains('adapters/claude/tool-check.sh')) { Ok "hooks.json wires the mid-turn check" } else { Bad "hooks.json wires the mid-turn check" "missing" }
+$env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
+
+Write-Host "other agents:"
+# Every adapter: the reply shape its agent expects, the loop guard, the tier shared
+# between its end-of-turn and mid-turn hooks, and silence on any failure.
+function Ad ($script, $cfg, $stdin) {
+    $env:CONTINUUM_STATE_DIR = Join-Path $tmp $cfg
+    $out = $stdin | & pwsh -NoProfile -File (Join-Path $root "adapters/$script") 2>$null
+    return ($out -join '')
+}
+Check "codex stop blocks" '"decision":"block"' (Ad 'codex/stop.ps1' 'cx1' '{"session_id":"c1"}')
+if (-not (Ad 'codex/stop.ps1' 'cx2' '{"session_id":"c2","stop_hook_active":true}')) { Ok "codex respects stop_hook_active" } else { Bad "codex respects stop_hook_active" "warned" }
+Check "codex mid-turn context" '"hookEventName":"PostToolUse"' (Ad 'codex/tool-check.ps1' 'cx3' '{"session_id":"c3"}')
+if (-not (Ad 'codex/stop.ps1' 'cx3' '{"session_id":"c3"}')) { Ok "codex tier shared by both hooks" } else { Bad "codex tier shared by both hooks" "warned twice" }
+Check "gemini after-agent denies" '"decision":"deny"' (Ad 'gemini/after-agent.ps1' 'gm1' '{"session_id":"g1"}')
+if (-not (Ad 'gemini/after-agent.ps1' 'gm2' '{"session_id":"g2","stop_hook_active":true}')) { Ok "gemini respects stop_hook_active" } else { Bad "gemini respects stop_hook_active" "warned" }
+Check "gemini mid-turn context" '"hookEventName":"AfterTool"' (Ad 'gemini/after-tool.ps1' 'gm3' '{"session_id":"g3"}')
+Check "cursor stop follows up" '"followup_message":"[continuum]' (Ad 'cursor/stop.ps1' 'cu1' '{"conversation_id":"u1","status":"completed","loop_count":0}')
+if (-not (Ad 'cursor/stop.ps1' 'cu2' '{"conversation_id":"u2","status":"completed","loop_count":1}')) { Ok "cursor respects loop_count" } else { Bad "cursor respects loop_count" "warned" }
+if (-not (Ad 'cursor/stop.ps1' 'cu3' '{"conversation_id":"u3","status":"aborted","loop_count":0}')) { Ok "cursor silent after an aborted turn" } else { Bad "cursor silent after an aborted turn" "warned" }
+Check "cursor mid-turn context" '"additional_context":"Mid-turn usage check.' (Ad 'cursor/tool-check.ps1' 'cu4' '{"conversation_id":"u4"}')
+if (-not (Ad 'cursor/stop.ps1' 'cu4' '{"conversation_id":"u4","status":"completed","loop_count":0}')) { Ok "cursor tier shared by both hooks" } else { Bad "cursor tier shared by both hooks" "warned twice" }
+$f = 0
+foreach ($a in @('codex/stop.ps1', 'codex/tool-check.ps1', 'gemini/after-agent.ps1', 'gemini/after-tool.ps1', 'cursor/stop.ps1', 'cursor/tool-check.ps1')) {
+    $env:CONTINUUM_OFF = '1'
+    if (Ad $a 'off' '{"session_id":"o","conversation_id":"o"}') { Bad "$a respects CONTINUUM_OFF" "warned"; $f = 1 }
+    Remove-Item Env:CONTINUUM_OFF
+    $env:CONTINUUM_MOCK = '46.0 10.0'
+    if (Ad $a 'low' '{"session_id":"l","conversation_id":"l"}') { Bad "$a silent under threshold" "warned"; $f = 1 }
+    Remove-Item Env:CONTINUUM_MOCK
+    $j = Ad $a ("json" + ($a -replace '[/.]', '_')) '{"session_id":"j","conversation_id":"j"}'
+    try { $j | ConvertFrom-Json | Out-Null } catch { Bad "$a prints valid JSON" $j; $f = 1 }
+}
+if ($f -eq 0) { Ok "adapters: CONTINUUM_OFF, under threshold, valid JSON" }
+if (Get-Command node -ErrorAction SilentlyContinue) {
+    $env:CONTINUUM_ROOT = $root
+    $env:CONTINUUM_STATE_DIR = Join-Path $tmp 'oc'
+    $oc = (& node (Join-Path $root 'tests/opencode.mjs') (Join-Path $root 'adapters/opencode/continuum.js') 2>&1) -join "`n"
+    Remove-Item Env:CONTINUUM_ROOT
+    foreach ($want in @('idle prompts the session', 'idle fires once per tier', 'child session is skipped', 'mid-turn appends to tool output', 'off is silent')) {
+        Check "opencode: $want" "ok $want" $oc
+    }
+} else { Write-Host '  skip opencode plugin (no node)' }
 $env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
 
 Write-Host "multi-provider:"

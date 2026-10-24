@@ -13,13 +13,13 @@
 - Репозиторий: `TropinAlexey/continuum` (локально `claude-token-budget`), ветка `main`, лицензия MIT.
 - Платформы: macOS, Linux, FreeBSD/OpenBSD/NetBSD, Windows (Git Bash или PowerShell). Только POSIX `sh` + `curl`, без зависимостей.
 - **Agent-agnostic** (с 2026-09-24): ядро (`bin/`, `lib/`, `providers/`) не знает, какой агент его вызвал; интеграции — тонкие адаптеры в `adapters/<агент>/`. Агент и провайдер — независимые оси.
-- Артефакты: **CLI** (`bin/continuum` + `bin/continuum.ps1`), **адаптеры** (сейчас только `adapters/claude/`, он же Claude Code plugin через `hooks/hooks.json`) и скиллы.
+- Артефакты: **CLI** (`bin/continuum` + `bin/continuum.ps1`), **адаптеры** (`adapters/claude/` — он же Claude Code plugin через `hooks/hooks.json`; `codex/`, `gemini/`, `cursor/` — command-хуки на общем `adapters/lib.sh|ps1`; `opencode/continuum.js` — JS-плагин) и скиллы.
 
 ## Как устроено
 
 1. **Provider** (`providers/anthropic.sh`) — `curl` к usage-endpoint, печатает `5h 86.5 1783000000` (окно, %, epoch ресета). Весь контракт провайдера — эти 3 колонки. Свои провайдеры: `docs/writing-a-provider.md`.
 2. **`continuum check [--session ID] [--agent NAME]`** — агент-нейтральное ядро предупреждения: 10-мин кэш, тиры, флаги, текст. Пусто = молчать, иначе одна строка текста; exit 0 всегда (кроме плохих аргументов). Тиры: `80→90→95→99` (основное окно), `70→85→95` (weekly). Каждый тир один раз, пере-вооружается при спаде usage. Формулировка «как спросить» по агенту — `cnt_ask_hint`.
-3. **Адаптер Claude** (`adapters/claude/`): `stop.sh` (Stop-событие → `check` → blocking JSON), `tool-check.sh` (PostToolUse → `check` → `additionalContext`, посреди хода; молчит в сабагентах по `agent_id`; флаги общие со Stop), `frugal-gate.sh` (в `CONTINUUM_FRUGAL=1` блокирует `Agent`), `statusline.sh`, `setup-statusline.sh`, `resume-report.sh` (+ `.ps1`). `hooks/*.sh|ps1` — форвардеры для старых конфигов, удалить в v0.7.
+3. **Адаптер Claude** (`adapters/claude/`): `stop.sh` (Stop-событие → `check` → blocking JSON), `tool-check.sh` (PostToolUse → `check` → `additionalContext`, посреди хода; молчит в сабагентах по `agent_id`; флаги общие со Stop), `frugal-gate.sh` (в `CONTINUUM_FRUGAL=1` блокирует `Agent`), `statusline.sh`, `setup-statusline.sh`, `resume-report.sh` (+ `.ps1`). `hooks/*.sh|ps1` — форвардеры для старых конфигов, удалить в v0.8 (в v0.7.0 оставлены, чтобы релиз адаптеров не ломал старые settings.json).
 4. **Skill** (`skills/session-budget/SKILL.md`) — что делать при предупреждении: показать ситуацию, спросить пользователя через AskUserQuestion (на его языке), никогда не решать за него. Опции: wrap up / finish batch / save+resume / frugal / cheap-only / ignore.
 5. **`continuum resume`** — планирует headless-команду агента после ресета: `CONTINUUM_RESUME_CMD` → пресет `CONTINUUM_AGENT` (по умолчанию `claude`; пресеты других агентов появятся с их адаптерами) → ошибка. Планировщик по ОС: launchd / systemd-run / daemon(8) / detached process / nohup-fallback. Вейклок + нотификация.
 6. **Состояние** — `CNT_STATE`: `$CONTINUUM_STATE_DIR` → `$XDG_STATE_HOME/continuum` → `~/.local/state/continuum` (одинаково в sh и ps1). НЕ `~/.continuum` — там код от инсталлятора (`CONTINUUM_HOME`). Разовая миграция из `~/.claude` (копирует conf/логи/провайдеры, не кэш; маркер `.migrated`). `$CNT_STATE/root` — указатель на код для скриптов без окружения (копия statusline в `~/.claude/hooks/`). Токен Claude (`~/.claude/.credentials.json`) ищет провайдер `anthropic`, не ядро.
@@ -29,7 +29,8 @@
 ## Карта репо
 
 - `bin/continuum`, `bin/continuum.ps1` — CLI (status/reset/estimate/watch/history/cleanup/providers/statusline/resume).
-- `adapters/claude/` — Claude Code адаптер (stop, frugal-gate, statusline, setup-statusline, resume-report + `.ps1`).
+- `adapters/claude/` — Claude Code адаптер (stop, tool-check, frugal-gate, statusline, setup-statusline, resume-report + `.ps1`).
+- `adapters/{codex,gemini,cursor}/` — конец хода + после инструмента (`.sh` + `.ps1`), общий `adapters/lib.sh|ps1`; `adapters/opencode/continuum.js` (тест — `tests/opencode.mjs` под node). У каждого `README.md` с готовым конфигом.
 - `hooks/hooks.json` — манифест хуков плагина (указывает в `adapters/claude/`); `hooks/*.sh|ps1` — форвардеры совместимости.
 - `lib/core.sh`, `lib/core.ps1` — общая логика (провайдеры, кэш, JSON-парсинг).
 - `providers/` — `anthropic.sh`, `mock.sh`, `spend.sh`.
@@ -43,8 +44,8 @@
 ## Команды
 
 ```sh
-sh tests/run.sh          # 137 тестов, mock, без сети (эталон; проходит и под dash)
-pwsh tests/run.ps1       # 114 тестов, та же сюита для PowerShell
+sh tests/run.sh          # 160 тестов, mock, без сети (эталон; проходит и под dash)
+pwsh tests/run.ps1       # 136 тестов, та же сюита для PowerShell
 continuum status         # 5h 86.5% resets at 21:40 + weekly строка
 continuum reset          # HH:MM ресета (+90s, для планировщика)
 continuum estimate       # сколько осталось at this pace
@@ -54,7 +55,9 @@ continuum check --session ID --agent claude  # ядро предупрежден
 continuum resume "$(continuum reset)" "$PWD" "конкретная задача"  # NEVER generic "continue"
 ```
 
-## Текущее состояние (2026-10-23)
+## Текущее состояние (2026-10-24)
+
+- **v0.7.0 — адаптеры Codex CLI, Gemini CLI, Cursor, opencode** (подпроекты 2–4): протоколы взяты из официальных доков (Codex `Stop` block / `PostToolUse` additionalContext; Gemini `AfterAgent` deny / `AfterTool` additionalContext; Cursor `stop` followup_message / `postToolUse` additional_context; opencode `session.idle` → `client.session.prompt`, `tool.execute.after` → дописать в output). Пресеты resume для всех четырёх (Codex сверен с `codex exec resume --help` 0.164.0; остальные — по докам). Cursor без `--force` (ревью безопасности: `--force` = любые команды без присмотра; opt-in через `CONTINUUM_RESUME_CMD`). **Вживую ни один не запускался** — локально есть только opencode, а в нём только платные OpenRouter/xAI. **Тесты: sh 160/160 (и под dash), ps 136/136.**
 
 - **v0.6.3 — проверка порога внутри хода**: `adapters/claude/tool-check.sh|ps1` на `PostToolUse` → `continuum check` → `hookSpecificOutput.additionalContext` (не блокирует). Флаги общие со Stop, молчит в сабагентах (`agent_id`), ~0.1 с на вызов при свежем кэше. Проверено вживую через `claude -p --plugin-dir .` с mock. Коммит прямо в `main` по просьбе пользователя, тег — после зелёного CI. **Тесты: sh 137/137 (и под dash), ps 114/114.**
 
@@ -80,9 +83,9 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
    - **`continuum doctor`**: подключённый коммит, включён ли плагин (`enabledPlugins`), legacy-хуки (`token-budget-check.sh`, `~/.claude/lib/usage.sh`), дрейф копии statusline + одна команда миграции. Связано с п.4.
    - **Auto-resume по 429 внутри хода**: у Claude Code есть событие `StopFailure` (matcher `rate_limit`), без decision control — спросить пользователя нельзя. Вариант: по нему писать заметку/уведомление «лимит, сброс в HH:MM, `continuum resume …`», а не планировать молча (resume без согласия нарушает принцип «не решать за пользователя»).
    - **Мусор `*.tmp`**: фоновый refresh в `statusline.sh` оставляет 0-байтный `$cache.$$.tmp`, если процесс убит до `mv`. Чистить tmp старше N мин при отрисовке (sh + ps1 + тесты).
-1. **Адаптер Codex CLI** (подпроект 2) — своя спека по актуальной доке Codex: хуки, соблюдает ли `block`, пресет resume, строка в `cnt_ask_hint`.
-2. **Адаптер opencode** (подпроект 3) — JS-плагин, зовущий `continuum check`.
-3. **Адаптеры Cursor и Gemini CLI** (подпроект 4).
+1. **Живая проверка новых адаптеров** (Codex, Gemini, Cursor, opencode): по одной сессии с `CONTINUUM_THRESHOLD=10 CONTINUUM_TIERS=10` + mock-провайдер; по итогам — строка «run live» в README/harnesses. Отдельно: есть ли у агентов инструмент вопроса (тогда строка в `cnt_ask_hint`).
+2. ~~Адаптеры Codex / opencode / Cursor / Gemini~~ — сделано 2026-10-24, v0.7.0.
+3. —
 4. **`continuum install --agent <x>`** + доки (подпроект 5); заодно проверить marketplace-установку с нуля.
 5. **Новый провайдер** — OpenAI или Gemini по `docs/writing-a-provider.md` (отдельная ось от агентов).
 6. Мелочи: `continuum cleanup` от `.DS_Store`-мусора? 30-сек гейт statusline на `bfs` не работает (`-mmin -0.5` → ошибка → фоновый запрос на каждую отрисовку) — заменить на портируемое сравнение mtime. CI: `actions/checkout@v4` на Node 20 (deprecated), PSScriptAnalyzer из PSGallery иногда не ставится.

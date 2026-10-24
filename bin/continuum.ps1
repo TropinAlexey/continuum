@@ -74,7 +74,11 @@ function Invoke-Reset {
 function Get-CntResumePreset {
     param([string]$Agent)
     switch ($Agent) {
-        'claude' { return 'claude --continue -p "{prompt}" --permission-mode acceptEdits' }
+        'claude'   { return 'claude --continue -p "{prompt}" --permission-mode acceptEdits' }
+        'codex'    { return 'codex exec resume --last -c sandbox_mode=workspace-write "{prompt}"' }
+        'gemini'   { return 'gemini --resume latest --approval-mode auto_edit -p "{prompt}"' }
+        'cursor'   { return 'agent -p --continue "{prompt}"' }
+        'opencode' { return 'opencode run --continue "{prompt}"' }
         default  { return $null }
     }
 }

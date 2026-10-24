@@ -83,6 +83,10 @@ check "swappable agent"           'sh exec "run it.'                 "$(dry 'sh 
 check "template without {prompt}" 'sh --continue'                    "$(dry 'sh --continue' 'ignored')"
 check "hostile prompt escaped"    '\"the\"'                        "$(dry 'sh run "{prompt}"' 'fix "the" bug')"
 check "agent preset claude"      'claude --continue'                "$(CONTINUUM_AGENT=claude dry '' 'x')"
+check "agent preset codex"       'codex exec resume --last'         "$(CONTINUUM_AGENT=codex dry '' 'x')"
+check "agent preset gemini"      'gemini --resume latest'           "$(CONTINUUM_AGENT=gemini dry '' 'x')"
+check "agent preset cursor"      'agent -p --continue'      "$(CONTINUUM_AGENT=cursor dry '' 'x')"
+check "agent preset opencode"    'opencode run --continue'          "$(CONTINUUM_AGENT=opencode dry '' 'x')"
 if (CONTINUUM_AGENT=nope dry '' 'x') >/dev/null 2>&1
 then bad "unknown agent without command fails" "exit 0"
 else ok  "unknown agent without command fails"; fi
@@ -320,6 +324,48 @@ check "subagent does not use up the tier" "Mid-turn usage check" "$(tool mta '{"
 printf '{"session_id":"mtg"}' | CONTINUUM_STATE_DIR=/proc/nonexistent sh "$ROOT/adapters/claude/tool-check.sh" >/dev/null 2>&1 \
     && ok "mid-turn exit 0 on unwritable state dir" || bad "mid-turn exit 0 on unwritable state dir" "non-zero exit"
 grep -q 'adapters/claude/tool-check.sh' "$ROOT/hooks/hooks.json" && ok "hooks.json wires the mid-turn check" || bad "hooks.json wires the mid-turn check" "missing"
+
+echo "other agents:"
+# Every adapter: the reply shape its agent expects, the loop guard, the tier shared
+# between its end-of-turn and mid-turn hooks, and silence on any failure.
+ad() { # ad <adapter script> <state dir> <stdin json> -> stdout
+    printf '%s' "$3" | CONTINUUM_STATE_DIR="$TMP/$2" sh "$ROOT/adapters/$1" 2>/dev/null || true
+}
+check "codex stop blocks"            '{"decision":"block","reason":"[continuum]' "$(ad codex/stop.sh cx1 '{"session_id":"c1"}')"
+[ -z "$(ad codex/stop.sh cx2 '{"session_id":"c2","stop_hook_active":true}')" ] && ok "codex respects stop_hook_active" || bad "codex respects stop_hook_active" "warned"
+out=$(ad codex/tool-check.sh cx3 '{"session_id":"c3","tool_name":"shell"}')
+check "codex mid-turn context"       '"hookEventName":"PostToolUse","additionalContext":"Mid-turn usage check.' "$out"
+[ -z "$(ad codex/stop.sh cx3 '{"session_id":"c3"}')" ] && ok "codex tier shared by both hooks" || bad "codex tier shared by both hooks" "warned twice"
+check "gemini after-agent denies"    '{"decision":"deny","reason":"[continuum]' "$(ad gemini/after-agent.sh gm1 '{"session_id":"g1"}')"
+[ -z "$(ad gemini/after-agent.sh gm2 '{"session_id":"g2","stop_hook_active":true}')" ] && ok "gemini respects stop_hook_active" || bad "gemini respects stop_hook_active" "warned"
+check "gemini mid-turn context"      '"hookEventName":"AfterTool","additionalContext":"Mid-turn usage check.' "$(ad gemini/after-tool.sh gm3 '{"session_id":"g3"}')"
+check "cursor stop follows up"       '{"followup_message":"[continuum]' "$(ad cursor/stop.sh cu1 '{"conversation_id":"u1","status":"completed","loop_count":0}')"
+[ -z "$(ad cursor/stop.sh cu2 '{"conversation_id":"u2","status":"completed","loop_count":1}')" ] && ok "cursor respects loop_count" || bad "cursor respects loop_count" "warned"
+[ -z "$(ad cursor/stop.sh cu3 '{"conversation_id":"u3","status":"aborted","loop_count":0}')" ] && ok "cursor silent after an aborted turn" || bad "cursor silent after an aborted turn" "warned"
+check "cursor mid-turn context"      '{"additional_context":"Mid-turn usage check.' "$(ad cursor/tool-check.sh cu4 '{"conversation_id":"u4"}')"
+[ -z "$(ad cursor/stop.sh cu4 '{"conversation_id":"u4","status":"completed","loop_count":0}')" ] && ok "cursor tier shared by both hooks" || bad "cursor tier shared by both hooks" "warned twice"
+f=0
+for a in codex/stop.sh codex/tool-check.sh gemini/after-agent.sh gemini/after-tool.sh cursor/stop.sh cursor/tool-check.sh; do
+    [ -z "$(CONTINUUM_OFF=1 ad "$a" off '{"session_id":"o","conversation_id":"o"}')" ] || { bad "$a respects CONTINUUM_OFF" "warned"; f=1; }
+    [ -z "$(CONTINUUM_MOCK="46.0 10.0" ad "$a" low '{"session_id":"l","conversation_id":"l"}')" ] || { bad "$a silent under threshold" "warned"; f=1; }
+    printf '{"session_id":"x"}' | CONTINUUM_STATE_DIR=/proc/nonexistent sh "$ROOT/adapters/$a" >/dev/null 2>&1 || { bad "$a exit 0 on unwritable state dir" "non-zero exit"; f=1; }
+done
+[ "$f" = 0 ] && ok "adapters: CONTINUUM_OFF, under threshold, unwritable state dir"
+if command -v python3 >/dev/null 2>&1; then
+    for a in codex/stop.sh codex/tool-check.sh gemini/after-agent.sh gemini/after-tool.sh cursor/stop.sh cursor/tool-check.sh; do
+        out=$(CONTINUUM_MOCK='86.5 41.0' ad "$a" "json$(echo "$a" | tr '/.' '__')" '{"session_id":"j","conversation_id":"j"}')
+        printf '%s' "$out" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null || { bad "$a prints valid JSON" "$out"; f=1; }
+    done
+    [ "$f" = 0 ] && ok "adapters print valid JSON"
+fi
+if command -v node >/dev/null 2>&1; then
+    out=$(CONTINUUM_ROOT="$ROOT" CONTINUUM_STATE_DIR="$TMP/oc" node "$ROOT/tests/opencode.mjs" "$ROOT/adapters/opencode/continuum.js" 2>&1)
+    for want in "idle prompts the session" "idle fires once per tier" "child session is skipped" "mid-turn appends to tool output" "off is silent"; do
+        check "opencode: $want" "ok $want" "$out"
+    done
+else
+    printf '  skip opencode plugin (no node)\n'
+fi
 
 echo "multi-provider:"
 out=$(CONTINUUM_PROVIDER=mock,mock sh "$ROOT/bin/continuum" status 2>&1)

@@ -65,34 +65,31 @@ All the logic lives in `continuum check`; an adapter only translates.
 | Harness | Warning | Interactive question | Status |
 |---|---|---|---|
 | **Claude Code** | yes | yes | Supported: `adapters/claude/`. `Stop` hook returning `{"decision":"block","reason":...}`, plus a `PostToolUse` hook returning the same text as `hookSpecificOutput.additionalContext` in the middle of a turn. Tested in CI on Linux, macOS, Windows. |
-| **Codex CLI** | probably | unknown | Codex has lifecycle hooks including `Stop`, and its config accepts the same `hooks.json` schema. Whether it honours a `block` decision is undocumented. **Untested — try it and tell us.** |
+| **Codex CLI** | yes | no question tool known | `adapters/codex/`: `Stop` → `{"decision":"block","reason":...}`, `PostToolUse` → `hookSpecificOutput.additionalContext`. Tested in CI against the documented protocol; **not yet run live**. Hooks need `/hooks` trust. |
+| **Gemini CLI** | yes | no question tool known | `adapters/gemini/`: `AfterAgent` → `{"decision":"deny","reason":...}` (retry with the reason as a prompt), `AfterTool` → `hookSpecificOutput.additionalContext`. Tested in CI; **not yet run live**. |
+| **Cursor** | yes | no question tool known | `adapters/cursor/`: `stop` → `{"followup_message":...}`, `postToolUse` → `{"additional_context":...}`. Tested in CI; **not yet run live**. Forum reports: some Windows versions ignore hook output. |
+| **opencode** | yes | no question tool known | `adapters/opencode/continuum.js` plugin: `session.idle` → `client.session.prompt`, `tool.execute.after` → appended to the tool output. Tested in CI with a fake client; **not yet run live**. |
 | **Anything else** | yes, via `continuum watch` | no | The watcher tells *you*. You decide, and you tell the agent. |
 
 If your harness supports blocking hooks and you get it working, send a PR with the config
 snippet and we will add a row — with an honest note about what is verified and what is not.
 
-## Codex CLI, experimental
+## Wiring the adapters
 
-Codex reads hooks from `hooks.json` or a `[hooks]` table in `config.toml`, with `Stop` among the
-supported events. Until Codex has its own adapter, the Claude Code one speaks the same schema:
+Each adapter folder has a README with the exact config to add: [Codex](../adapters/codex/README.md),
+[Gemini CLI](../adapters/gemini/README.md), [Cursor](../adapters/cursor/README.md),
+[opencode](../adapters/opencode/README.md). The command-hook adapters share
+[`adapters/lib.sh`](../adapters/lib.sh) / `lib.ps1`.
 
-```json
-{
-  "hooks": {
-    "Stop": [
-      { "hooks": [ { "type": "command", "command": "sh /path/to/continuum/adapters/claude/stop.sh" } ] }
-    ]
-  }
-}
-```
-
-If Codex ignores the `block` decision you will get no warning and no error — the hook will simply
-print JSON into the void. In that case use `continuum watch` instead. Do not assume it worked
-because nothing broke.
+If an agent ignores the reply, you get no warning and no error: the hook prints JSON into the
+void. Do not assume it worked because nothing broke. Test once with a low threshold
+(`CONTINUUM_THRESHOLD=10 CONTINUUM_TIERS=10`), or keep `continuum watch` open.
 
 ## Writing an adapter
 
-An adapter is a few lines in `adapters/<agent>/` (plus a `.ps1` twin) that:
+An adapter is a few lines in `adapters/<agent>/` (plus a `.ps1` twin). If the agent's hooks are
+commands speaking JSON, source `adapters/lib.sh` and copy `adapters/codex/` as a starting point.
+The adapter:
 
 1. reads the agent's hook event and pulls out a session id;
 2. bails out early if the agent says it is already handling a previous block (Claude:
