@@ -275,7 +275,7 @@ The adapter is a plugin, [`adapters/opencode/continuum.js`](adapters/opencode/RE
 
 ## Junie (JetBrains)
 
-Junie CLI installs Claude Code plugins as extensions and runs their hooks, so continuum works in it as is: in Junie, `/extensions`, add the marketplace `https://github.com/TropinAlexey/continuum`, install `continuum`. The Claude Code adapter recognizes Junie by `project_path` in its events: the warning asks Junie to end its final message with a question (it has no question tool), the mid-turn check runs on `PreToolUse` (Junie has no `PostToolUse`), and Claude Code's settings are left alone. Resume preset: `junie --skip-update-check --resume --task "<task>"`. In the IDE (RustRover, IntelliJ IDEA, Rider, …) you pick the chat's agent; Junie there runs through ACP, which does not call hooks yet, and other chat agents are not checked yet: use Junie CLI or Claude Code in the IDE's terminal, or `continuum watch`. See [`adapters/junie/`](adapters/junie/README.md).
+Junie CLI installs Claude Code plugins as extensions and runs their hooks, so continuum works in it as is: in Junie, `/extensions`, add the marketplace `https://github.com/TropinAlexey/continuum`, install `continuum`. The Claude Code adapter recognizes Junie by its events (`project_path`, no `transcript_path`): the warning asks Junie to end its final message with a question (it has no question tool), the mid-turn check runs on `PreToolUse` (Junie has no `PostToolUse`), and Claude Code's settings are left alone. Resume preset: `junie --skip-update-check --resume --task "<task>"`. In the IDE (RustRover, IntelliJ IDEA, Rider, …) you pick the chat's agent; Junie there runs through ACP, which does not call hooks yet, and other chat agents are not checked yet: use Junie CLI or Claude Code in the IDE's terminal, or `continuum watch`. See [`adapters/junie/`](adapters/junie/README.md).
 
 ## bb
 
@@ -284,8 +284,8 @@ bb is a desktop app that runs agents in threads, so the warning comes from the a
 ## Contributing
 
 ```
-sh tests/run.sh          # 179 tests, mock provider, no network (also passes under dash)
-pwsh tests/run.ps1       # 149 tests, the same suite for PowerShell
+sh tests/run.sh          # 180 tests, mock provider, no network (also passes under dash)
+pwsh tests/run.ps1       # 150 tests, the same suite for PowerShell
 ```
 
 Every `.sh` change has a matching `.ps1` change, with tests in both suites. Help is welcome with a provider for another budget (OpenAI, Gemini: see [docs/writing-a-provider.md](docs/writing-a-provider.md)) and an adapter for another agent ([docs/harnesses.md](docs/harnesses.md)).

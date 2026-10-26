@@ -32,9 +32,11 @@ sid=$(printf '%s' "$event" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]
 
 # A Stop hook that exits non-zero spams the user: any failure means silence.
 # Junie CLI installs this plugin from the marketplace and runs the same hooks; its
-# events carry project_path, Claude Code's do not.
+# events carry project_path and no transcript_path, Claude Code's always carry
+# transcript_path (project_path alone could come from a nested tool_input).
 agent=claude
-printf '%s' "$event" | grep -q '"project_path"[[:space:]]*:' && agent=junie
+printf '%s' "$event" | grep -q '"project_path"[[:space:]]*:' \
+    && ! printf '%s' "$event" | grep -q '"transcript_path"[[:space:]]*:' && agent=junie
 reason=$(sh "$root/bin/continuum" check --session "${sid:-unknown}" --agent "$agent" 2>/dev/null) || exit 0
 [ -n "$reason" ] || exit 0
 

@@ -37,15 +37,16 @@
 - `skills/session-budget/`, `skills/auto-resume/` — скиллы плагина.
 - `tests/run.sh`, `tests/run.ps1` — единый сьют, mock-провайдер, без сети.
 - `docs/harnesses.md` (агенты + «Writing an adapter»), `docs/writing-a-provider.md` — доки.
-- `docs/superpowers/specs/2026-09-24-agent-neutral-core-design.md` — спека agent-agnostic (подпроект 1 из 5).
+- `docs/superpowers/specs/` — спеки (пайплайн и шаблон в `README.md` там же); `2026-09-24-agent-neutral-core-design.md` — agent-agnostic, `2026-10-26-roadmap.md` — что дальше.
+- `docs/agents/issue-tracker.md` — где ревью ищет спеку; `.github/pull_request_template.md` — чеклист PR.
 - `README.md` (EN) + `README.ru.md` (RU) — держать синхронно, шапка центрированная, лого `assets/logo.png` 120px.
 - `.remember/` — автопамять Claude-плагина remember (now.md / today-*.md / recent.md / archive.md). Только для Claude; кросс-агентная правда — этот файл.
 
 ## Команды
 
 ```sh
-sh tests/run.sh          # 179 тестов, mock, без сети (эталон; проходит и под dash)
-pwsh tests/run.ps1       # 149 тестов, та же сюита для PowerShell
+sh tests/run.sh          # 180 тестов, mock, без сети (эталон; проходит и под dash)
+pwsh tests/run.ps1       # 150 тестов, та же сюита для PowerShell
 continuum status         # 5h 86.5% resets at 21:40 + weekly строка
 continuum reset          # HH:MM ресета (+90s, для планировщика)
 continuum estimate       # сколько осталось at this pace
@@ -57,7 +58,7 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
 
 ## Текущее состояние (2026-10-26)
 
-- **v0.7.2 — Junie (JetBrains) + фиксы**: Junie CLI ставит Claude-плагины как расширения и гоняет их `hooks/hooks.json` (`${CLAUDE_PLUGIN_ROOT}`), так что отдельных скриптов нет — Claude-адаптер узнаёт Junie по `project_path` в событии → `--agent junie` (свой hint: вопрос в конце итогового сообщения, без AskUserQuestion). Junie не шлёт `PostToolUse` → `tool-check.sh` подключён и на `PreToolUse` (в Claude сразу выходит). `setup-statusline.sh` в Junie ничего не делает. Пресет `junie --skip-update-check --resume --task "{prompt}"`. Вживую (Junie CLI 26.10.20, batch): Stop-предупреждение дошло, `--resume --task` продолжает ту же сессию. В IDE (RustRover и др.) агент чата — по выбору, всё через ACP: Junie там хуки не вызывает (их доки), Claude Agent / Codex в чате ещё не проверены (беклог: если их ACP-мост грузит пользовательские хуки, как Agent SDK в bb, — работает без доработок). Доки `adapters/junie/README.md`. Плюс фиксы: 30-сек гейт statusline — метка `$cache.at` вместо `find -mmin -0.5` (bfs на macOS его не понимал → запрос на каждую отрисовку); уборка `$cache.<pid>.tmp` старше 10 мин (sh + ps1); PSScriptAnalyzer: `$event`→`$hookEvent` (автопеременная), `Invoke-History`→`Invoke-CntHistory` (перекрывал командлет); CI `actions/checkout@v5`. RustRover подключён к Claude Code как MCP `rustrover` (`http://127.0.0.1:64522/stream`, как `rider`). **Тесты: sh 179/179 (и под dash), ps 149/149.**
+- **v0.7.2 — выпущен 2026-10-26** (тег + GitHub Release, CI зелёный на 6 джобах; включает v0.7.1: bb + сброс недельного окна). **Junie (JetBrains) + фиксы**: Junie CLI ставит Claude-плагины как расширения и гоняет их `hooks/hooks.json` (`${CLAUDE_PLUGIN_ROOT}`), так что отдельных скриптов нет — Claude-адаптер узнаёт Junie по `project_path` в событии → `--agent junie` (свой hint: вопрос в конце итогового сообщения, без AskUserQuestion). Junie не шлёт `PostToolUse` → `tool-check.sh` подключён и на `PreToolUse` (в Claude сразу выходит). `setup-statusline.sh` в Junie ничего не делает. Пресет `junie --skip-update-check --resume --task "{prompt}"`. Вживую (Junie CLI 26.10.20, batch): Stop-предупреждение дошло, `--resume --task` продолжает ту же сессию. В IDE (RustRover и др.) агент чата — по выбору, всё через ACP: Junie там хуки не вызывает (их доки), Claude Agent / Codex в чате ещё не проверены (беклог: если их ACP-мост грузит пользовательские хуки, как Agent SDK в bb, — работает без доработок). Доки `adapters/junie/README.md`. Плюс фиксы: 30-сек гейт statusline — метка `$cache.at` вместо `find -mmin -0.5` (bfs на macOS его не понимал → запрос на каждую отрисовку); уборка `$cache.<pid>.tmp` старше 10 мин (sh + ps1); PSScriptAnalyzer: `$event`→`$hookEvent` (автопеременная), `Invoke-History`→`Invoke-CntHistory` (перекрывал командлет); CI `actions/checkout@v5`. RustRover подключён к Claude Code как MCP `rustrover` (`http://127.0.0.1:64522/stream`, как `rider`). **Тесты: sh 180/180 (и под dash), ps 150/150.**
 
 - **v0.7.1 — bb + сброс недельного окна**: bb (`/Applications/bb.app`, CLI `~/.bb/bin/bb`) — оболочка над агентами, своих хуков не нужно: треды Claude Code идут через Agent SDK с `settingSources: user/project/local` (`~/.bb/plugin-host-artifacts/provider-claude-code/*/host.mjs`) → плагин continuum подгружается; Codex читает свои хуки. В ядре: при `BB_THREAD_ID` (bb ставит его агенту) `continuum resume` → `<абсолютный путь>/bb thread tell <id> "{prompt}"` (после `CONTINUUM_RESUME_CMD`, до пресета агента; id валидируется `[A-Za-z0-9_-]`; путь абсолютный, т.к. у launchd короткий PATH). Доки `adapters/bb/README.md`. По отзыву 2026-10-26: предупреждение недельного окна называет его сброс («resets Fri 18:28», `cnt_epoch_dayhhmm` / `ConvertTo-CntDayHhmm`). **Тесты: sh 165/165 (и под dash), ps 141/141.** bb вживую не проверен. В репо подключён RustRover (`.idea/`).
 
@@ -106,6 +107,19 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
 2. `git log --oneline -5 && git status -sb`, загляни в `.remember/now.md`, проверь новые файлы в `feedback/`.
 3. Если `main` грязный или отстаёт — скажи об этом первым.
 4. Предложи 1 следующий шаг из беклога + команду для старта. Без новых скоупов, пока не закроем выбранное.
+
+## Пайплайн (spec-first, обязательно)
+
+Подробно и шаблон — `docs/superpowers/specs/README.md`.
+
+1. **Спека** → `docs/superpowers/specs/YYYY-MM-DD-<тема>.md` (требования R1..Rn, out of scope, acceptance). Отдельный коммит `docs(spec): …`. Без согласованной спеки код не пишем.
+2. **Код** по требованиям; в каждом коммите трейлер `Spec: docs/superpowers/specs/<файл>.md`.
+3. **Ревью** — `/code-review <base>`: две оси, Standards (AGENTS.md/README) и Spec (недоделанные требования, лишнее, неверная реализация). Спеку скилл находит по трейлеру (`docs/agents/issue-tracker.md`).
+4. **Автофиксы** — сразу после ревью, без вопросов, агент правит то, что сочтёт нужным (в т.ч. находки ниже порога отчёта: hardening, мелкие баги, устаревшие комментарии). Границы: в рамках спеки и не нарушая её (без нового поведения и смены скоупа), sh+ps1 вместе, обе сюиты зелёные. Правка, меняющая спеку, — не автофикс: спросить или в «Later». **Любые проблемы безопасности** (секреты в коде/логах, инъекции, небезопасные пути/права, данные сверх раскрытого в «What it touches») — всегда автофикс, любой серьёзности, даже если сужают поведение; «What it touches» обновить в том же коммите. Отчёт — по строке на фикс.
+5. **Исправление** — оставшиеся находки обеих осей исправить и прогнать ревью снова, пока не чисто. Верное, но вне скоупа — в раздел «Later» спеки. Поменялось решение — правим спеку в том же коммите.
+6. **Релиз** — тесты обеих сюит, `claude plugin validate .`, push, зелёный CI, тег + Release, оба README; статус спеки `done (vX.Y.Z)`.
+
+Мелочи (опечатка, однострочный фикс, только доки) — без спеки, с пометкой в коммите.
 
 ## Конвенции (обязательно для всех агентов)
 

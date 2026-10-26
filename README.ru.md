@@ -275,7 +275,7 @@ continuum statusline reset              # вернуть настройки по
 
 ## Junie (JetBrains)
 
-Junie CLI ставит плагины Claude Code как расширения и запускает их хуки, поэтому continuum работает в нём как есть: в Junie `/extensions`, добавь маркетплейс `https://github.com/TropinAlexey/continuum`, установи `continuum`. Адаптер Claude Code узнаёт Junie по полю `project_path` в событиях: предупреждение просит Junie закончить итоговое сообщение вопросом (инструмента вопроса у неё нет), проверка внутри хода идёт на `PreToolUse` (`PostToolUse` у Junie нет), настройки Claude Code не трогаются. Пресет resume: `junie --skip-update-check --resume --task "<задача>"`. В IDE (RustRover, IntelliJ IDEA, Rider, …) агента для AI-чата выбираешь сам; Junie там идёт через ACP, а он хуки пока не вызывает, другие агенты чата ещё не проверены: используй Junie CLI или Claude Code в терминале IDE, либо `continuum watch`. Подробно — [`adapters/junie/`](adapters/junie/README.md).
+Junie CLI ставит плагины Claude Code как расширения и запускает их хуки, поэтому continuum работает в нём как есть: в Junie `/extensions`, добавь маркетплейс `https://github.com/TropinAlexey/continuum`, установи `continuum`. Адаптер Claude Code узнаёт Junie по событиям (`project_path` без `transcript_path`): предупреждение просит Junie закончить итоговое сообщение вопросом (инструмента вопроса у неё нет), проверка внутри хода идёт на `PreToolUse` (`PostToolUse` у Junie нет), настройки Claude Code не трогаются. Пресет resume: `junie --skip-update-check --resume --task "<задача>"`. В IDE (RustRover, IntelliJ IDEA, Rider, …) агента для AI-чата выбираешь сам; Junie там идёт через ACP, а он хуки пока не вызывает, другие агенты чата ещё не проверены: используй Junie CLI или Claude Code в терминале IDE, либо `continuum watch`. Подробно — [`adapters/junie/`](adapters/junie/README.md).
 
 ## bb
 
@@ -284,8 +284,8 @@ bb — десктоп-приложение, которое запускает а
 ## Участие
 
 ```
-sh tests/run.sh          # 179 тестов, mock-провайдер, без сети (проходит и под dash)
-pwsh tests/run.ps1       # 149 тестов, та же сюита для PowerShell
+sh tests/run.sh          # 180 тестов, mock-провайдер, без сети (проходит и под dash)
+pwsh tests/run.ps1       # 150 тестов, та же сюита для PowerShell
 ```
 
 Каждая правка `.sh` дублируется в `.ps1`, с тестами в обе сюиты. Пригодится помощь с провайдером для другого бюджета (OpenAI, Gemini: см. [docs/writing-a-provider.md](docs/writing-a-provider.md)) и с адаптером для другого агента ([docs/harnesses.md](docs/harnesses.md)).

@@ -341,6 +341,7 @@ out=$(tool jt '{"hook_event_name":"PreToolUse","session_id":"jt","project_path":
 check "junie mid-turn on PreToolUse"   '"hookEventName":"PreToolUse","additionalContext":"Mid-turn usage check.' "$out"
 check "junie gets its own hint"        'end your final message by asking' "$out"
 case "$out" in *AskUserQuestion*) bad "junie hint has no AskUserQuestion" "$out" ;; *) ok "junie hint has no AskUserQuestion" ;; esac
+check "claude stays claude with a nested project_path" 'use AskUserQuestion' "$(tool jn '{"hook_event_name":"PostToolUse","session_id":"jn","transcript_path":"/t.jsonl","tool_input":{"project_path":"/x"}}')"
 out=$(hook js '{"hook_event_name":"Stop","session_id":"js","project_path":"/p","stop_hook_active":false}')
 check "junie stop blocks with its hint" '{"decision":"block","reason":"[continuum]' "$out"
 check "junie stop names the resume preset" 'CONTINUUM_AGENT=junie continuum resume' "$out"

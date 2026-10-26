@@ -409,6 +409,7 @@ $out = Tool 'jt' '{"hook_event_name":"PreToolUse","session_id":"jt","project_pat
 Check "junie mid-turn on PreToolUse" '"hookEventName":"PreToolUse"' $out
 Check "junie gets its own hint" 'end your final message by asking' $out
 if ($out -notmatch 'AskUserQuestion') { Ok "junie hint has no AskUserQuestion" } else { Bad "junie hint has no AskUserQuestion" $out }
+Check "claude stays claude with a nested project_path" 'use AskUserQuestion' (Tool 'jn' '{"hook_event_name":"PostToolUse","session_id":"jn","transcript_path":"/t.jsonl","tool_input":{"project_path":"/x"}}')
 $out = Hook 'js' '{"hook_event_name":"Stop","session_id":"js","project_path":"/p","stop_hook_active":false}'
 Check "junie stop names the resume preset" 'CONTINUUM_AGENT=junie continuum resume' $out
 $env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'

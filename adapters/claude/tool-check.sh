@@ -35,9 +35,11 @@ sid=$(printf '%s' "$event" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]
 
 # Runs after every tool call: any failure means silence, never a hook error.
 # Junie CLI installs this plugin from the marketplace and runs the same hooks; its
-# events carry project_path, Claude Code's do not.
+# events carry project_path and no transcript_path, Claude Code's always carry
+# transcript_path (project_path alone could come from a nested tool_input).
 agent=claude
-printf '%s' "$event" | grep -q '"project_path"[[:space:]]*:' && agent=junie
+printf '%s' "$event" | grep -q '"project_path"[[:space:]]*:' \
+    && ! printf '%s' "$event" | grep -q '"transcript_path"[[:space:]]*:' && agent=junie
 # Junie fires PreToolUse but not PostToolUse, so this hook is wired to both; Claude
 # Code keeps the PostToolUse one and skips the duplicate.
 hook=PostToolUse

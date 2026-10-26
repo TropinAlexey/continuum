@@ -7,10 +7,11 @@
 set -eu
 
 # Junie CLI runs this plugin's hooks too; its SessionStart must not touch Claude
-# Code's settings. Junie's events carry project_path, Claude Code's do not.
+# Code's settings. Junie's events carry project_path and no transcript_path.
 if [ ! -t 0 ]; then
     event=$(cat)
-    printf '%s' "$event" | grep -q '"project_path"[[:space:]]*:' && exit 0
+    printf '%s' "$event" | grep -q '"project_path"[[:space:]]*:' \
+        && ! printf '%s' "$event" | grep -q '"transcript_path"[[:space:]]*:' && exit 0
 fi
 
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"

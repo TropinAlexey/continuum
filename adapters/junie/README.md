@@ -3,8 +3,8 @@
 Junie CLI installs Claude Code plugins from their marketplaces as Junie extensions and runs
 their `hooks/hooks.json`, with `${CLAUDE_PLUGIN_ROOT}` pointing at the extension. So there
 are no Junie-specific scripts: Junie runs the [Claude Code adapter](../claude/README.md), and
-the adapter notices Junie by the `project_path` field, which Junie's events carry and Claude
-Code's do not.
+the adapter notices Junie by its events: `project_path` without `transcript_path` (Claude
+Code always sends `transcript_path`).
 
 ## Install
 

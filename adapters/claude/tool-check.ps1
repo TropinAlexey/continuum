@@ -37,9 +37,10 @@ $sid = 'unknown'
 if ($hookEvent -match '"session_id"\s*:\s*"([^"]+)"') { $sid = $Matches[1] }
 
 # Junie CLI installs this plugin from the marketplace and runs the same hooks; its
-# events carry project_path, Claude Code's do not.
+# events carry project_path and no transcript_path, Claude Code's always carry
+# transcript_path (project_path alone could come from a nested tool_input).
 $agent = 'claude'
-if ($hookEvent -match '"project_path"\s*:') { $agent = 'junie' }
+if ($hookEvent -match '"project_path"\s*:' -and $hookEvent -notmatch '"transcript_path"\s*:') { $agent = 'junie' }
 # Junie fires PreToolUse but not PostToolUse, so this hook is wired to both; Claude
 # Code keeps the PostToolUse one and skips the duplicate.
 $hook = 'PostToolUse'
