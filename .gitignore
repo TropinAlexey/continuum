@@ -4,3 +4,4 @@ continuum-resume.log
 feedback/*
 !feedback/README.md
 .DS_Store
+.idea/
