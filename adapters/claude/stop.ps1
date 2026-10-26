@@ -27,15 +27,19 @@ foreach ($c in $candidates) {
 }
 if (-not $root) { exit 0 }
 
-$event = [Console]::In.ReadToEnd()
+$hookEvent = [Console]::In.ReadToEnd()
 
 # Never re-block while Claude is already handling a block (infinite loop guard).
-if ($event -match '"stop_hook_active"\s*:\s*true') { exit 0 }
+if ($hookEvent -match '"stop_hook_active"\s*:\s*true') { exit 0 }
 
 $sid = 'unknown'
-if ($event -match '"session_id"\s*:\s*"([^"]+)"') { $sid = $Matches[1] }
+if ($hookEvent -match '"session_id"\s*:\s*"([^"]+)"') { $sid = $Matches[1] }
 
-$reason = & (Join-Path $root 'bin/continuum.ps1') check --session $sid --agent claude
+# Junie CLI installs this plugin from the marketplace and runs the same hooks; its
+# events carry project_path, Claude Code's do not.
+$agent = 'claude'
+if ($hookEvent -match '"project_path"\s*:') { $agent = 'junie' }
+$reason = & (Join-Path $root 'bin/continuum.ps1') check --session $sid --agent $agent
 $reason = ($reason | Out-String).Trim()
 if (-not $reason) { exit 0 }
 

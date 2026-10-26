@@ -75,6 +75,12 @@ if ($stale) {
         try { New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null; Set-Content -Path $retry -Value '' } catch { }
     }
 }
+# A refresh killed before its move leaves $cache.<pid>.tmp behind; sweep old ones.
+try {
+    Get-ChildItem -Force -Path $cfgDir -Filter "$(Split-Path -Leaf $cache).*.tmp" -ErrorAction SilentlyContinue |
+        Where-Object { ((Get-Date) - $_.LastWriteTime).TotalMinutes -gt 10 } |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+} catch { }
 if (-not $lines) { exit 0 }
 
 $first = $lines[0].Split(' ', [StringSplitOptions]::RemoveEmptyEntries)

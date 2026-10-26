@@ -80,6 +80,7 @@ function Get-CntResumePreset {
         'gemini'   { return 'gemini --resume latest --approval-mode auto_edit -p "{prompt}"' }
         'cursor'   { return 'agent -p --continue "{prompt}"' }
         'opencode' { return 'opencode run --continue "{prompt}"' }
+        'junie'    { return 'junie --skip-update-check --resume --task "{prompt}"' }
         default  { return $null }
     }
 }
@@ -176,6 +177,9 @@ function Get-CntAskHint {
     param([string]$Agent)
     switch ($Agent) {
         'claude' { return 'Do not end the turn silently: run the session-budget skill - briefly state where we stopped, then use AskUserQuestion to ask the user how to spend the rest of the window, offering the options from that skill.' }
+        # Junie has no question tool and its Stop hook fires right before it submits
+        # the task, so the question goes at the end of the final message.
+        'junie'  { return 'Do not end the task silently: run the session-budget skill - briefly state where we stopped, then end your final message by asking the user how to spend the rest of the window, offering the options from that skill. To schedule a resume: CONTINUUM_AGENT=junie continuum resume.' }
         default  { return 'Do not end the turn silently: briefly state where we stopped, then ask the user how to spend the rest of the window - finish and wrap up, finish the current batch, save state and schedule a resume after the reset (continuum resume), frugal mode, cheap tasks only, or carry on.' }
     }
 }
@@ -393,7 +397,7 @@ function Invoke-Estimate {
     "Currently $($first[1])% used, window resets at $when"
 }
 
-function Invoke-History {
+function Invoke-CntHistory {
     $hist = Join-Path $script:CntState '.continuum-history.log'
     if (-not (Test-Path $hist)) { 'No history yet. History is recorded on each status check.'; return }
     Get-Content $hist | Select-Object -Last 20
@@ -484,7 +488,7 @@ switch ($Command) {
     'check'     { Invoke-Check @($Arg1, $Arg2, $Arg3, $Arg4) $Session $Agent }
     'watch'     { if ($Arg1) { Invoke-Watch ([int]$Arg1) } else { Invoke-Watch } }
     'resume'    { Invoke-Resume $Arg1 $Arg2 $Arg3 }
-    'history'   { Invoke-History }
+    'history'   { Invoke-CntHistory }
     'cleanup'   { Invoke-Cleanup }
     'statusline' { Invoke-StatuslineConfig $Arg1 $Arg2 }
     default     { [Console]::Error.WriteLine("continuum: unknown command '$Command'"); exit 1 }

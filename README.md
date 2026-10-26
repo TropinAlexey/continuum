@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.1-brightgreen.svg" alt="version: 0.7.0"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.2-brightgreen.svg" alt="version: 0.7.0"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -51,7 +51,7 @@ What the core reads, sends, writes and runs. Each adapter adds its own list, in 
 - **Network.** Only the provider talks to the network. The default `anthropic` provider makes one `GET https://api.anthropic.com/api/oauth/usage` with an OAuth token in the `Authorization` header. This is an **undocumented endpoint**, not a public API, and it may change. The result is cached for 10 minutes. The optional `spend` provider calls `https://api.anthropic.com/v1/billing/usage` with `ANTHROPIC_ADMIN_KEY`. Nothing else leaves the machine.
 - **Credentials.** The `anthropic` provider looks for the token in this order: `$CLAUDE_CODE_OAUTH_TOKEN`, the macOS Keychain entry `Claude Code-credentials`, then `~/.claude/.credentials.json`. It goes only to `api.anthropic.com` and is never written anywhere.
 - **Files.** Cache, flags, logs and config go to `~/.local/state/continuum` (see [Configuration](#configuration)). The CLI installer puts the code in `~/.continuum` and a symlink to it on your `PATH`.
-- **Unattended runs.** `continuum resume` starts your agent with nobody watching, using the agent's preset or `CONTINUUM_RESUME_CMD`. It runs only when you ask for it, by choosing "save and resume" or by running the command. Keep the task narrow, and don't point it at anything you wouldn't let a stranger merge.
+- **Unattended runs.** `continuum resume` starts your agent with nobody watching, using the agent's preset or `CONTINUUM_RESUME_CMD`; inside a bb thread it sends the task to that thread with `bb thread tell` instead. It runs only when you ask for it, by choosing "save and resume" or by running the command. Keep the task narrow, and don't point it at anything you wouldn't let a stranger merge.
 
 ## What happens
 
@@ -97,6 +97,7 @@ The core (`bin/`, `lib/`, `providers/`) never asks which agent is calling. Each 
 | **Gemini CLI** | [adapter](#gemini-cli), `settings.json` | `CONTINUUM_AGENT=gemini` | New: tested in CI, not yet run live |
 | **Cursor** | [adapter](#cursor), `hooks.json` | `CONTINUUM_AGENT=cursor` | New: tested in CI, not yet run live |
 | **opencode** | [adapter](#opencode), JS plugin | `CONTINUUM_AGENT=opencode` | New: tested in CI, not yet run live |
+| **Junie** (JetBrains: RustRover, IDEA, …) | the Claude Code plugin, installed as a Junie extension ([Junie](#junie-jetbrains)) | `CONTINUUM_AGENT=junie` | New: run live (CLI); the IDE chat calls no hooks yet |
 | **bb** (app) | the adapter of the agent in the thread ([bb](#bb)) | automatic: `bb thread tell` into the same thread | New: tested in CI, not yet run live |
 | Anything else | `continuum check` from a hook, or `continuum watch` in a spare pane | set `CONTINUUM_RESUME_CMD` | Works today |
 
@@ -272,6 +273,10 @@ The adapter lives in [`adapters/cursor/`](adapters/cursor/README.md): a `stop` h
 
 The adapter is a plugin, [`adapters/opencode/continuum.js`](adapters/opencode/README.md). On `session.idle` it sends the warning to the session as a prompt; after each tool call it appends it to the tool output. Install it with a symlink into `~/.config/opencode/plugins/`, as the adapter's README shows. It runs `continuum check` and nothing else. Resume preset: `opencode run --continue "<task>"`.
 
+## Junie (JetBrains)
+
+Junie CLI installs Claude Code plugins as extensions and runs their hooks, so continuum works in it as is: in Junie, `/extensions`, add the marketplace `https://github.com/TropinAlexey/continuum`, install `continuum`. The Claude Code adapter recognizes Junie by `project_path` in its events: the warning asks Junie to end its final message with a question (it has no question tool), the mid-turn check runs on `PreToolUse` (Junie has no `PostToolUse`), and Claude Code's settings are left alone. Resume preset: `junie --skip-update-check --resume --task "<task>"`. In the IDE (RustRover, IntelliJ IDEA, Rider, …) you pick the chat's agent; Junie there runs through ACP, which does not call hooks yet, and other chat agents are not checked yet: use Junie CLI or Claude Code in the IDE's terminal, or `continuum watch`. See [`adapters/junie/`](adapters/junie/README.md).
+
 ## bb
 
 bb is a desktop app that runs agents in threads, so the warning comes from the agent's own adapter: Claude Code threads load the plugins enabled in `~/.claude/settings.json` (install the [Claude Code](#claude-code) plugin), Codex threads read `~/.codex/hooks.json` ([Codex CLI](#codex-cli)). bb sets `BB_THREAD_ID` for the agent; when it is set, `continuum resume` sends the task back into the same thread with `bb thread tell <id> "<task>"` instead of a separate headless run (bb must be running at the reset; `CONTINUUM_RESUME_CMD` still wins). See [`adapters/bb/`](adapters/bb/README.md).
@@ -279,8 +284,8 @@ bb is a desktop app that runs agents in threads, so the warning comes from the a
 ## Contributing
 
 ```
-sh tests/run.sh          # 165 tests, mock provider, no network (also passes under dash)
-pwsh tests/run.ps1       # 141 tests, the same suite for PowerShell
+sh tests/run.sh          # 179 tests, mock provider, no network (also passes under dash)
+pwsh tests/run.ps1       # 149 tests, the same suite for PowerShell
 ```
 
 Every `.sh` change has a matching `.ps1` change, with tests in both suites. Help is welcome with a provider for another budget (OpenAI, Gemini: see [docs/writing-a-provider.md](docs/writing-a-provider.md)) and an adapter for another agent ([docs/harnesses.md](docs/harnesses.md)).

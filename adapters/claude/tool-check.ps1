@@ -27,19 +27,29 @@ foreach ($c in $candidates) {
 }
 if (-not $root) { exit 0 }
 
-$event = [Console]::In.ReadToEnd()
+$hookEvent = [Console]::In.ReadToEnd()
 
 # Inside a subagent there is nobody to ask, and firing there would use up the tier
 # before the main conversation sees it. Subagent tool calls carry agent_id.
-if ($event -match '"agent_id"\s*:') { exit 0 }
+if ($hookEvent -match '"agent_id"\s*:') { exit 0 }
 
 $sid = 'unknown'
-if ($event -match '"session_id"\s*:\s*"([^"]+)"') { $sid = $Matches[1] }
+if ($hookEvent -match '"session_id"\s*:\s*"([^"]+)"') { $sid = $Matches[1] }
 
-$reason = & (Join-Path $root 'bin/continuum.ps1') check --session $sid --agent claude
+# Junie CLI installs this plugin from the marketplace and runs the same hooks; its
+# events carry project_path, Claude Code's do not.
+$agent = 'claude'
+if ($hookEvent -match '"project_path"\s*:') { $agent = 'junie' }
+# Junie fires PreToolUse but not PostToolUse, so this hook is wired to both; Claude
+# Code keeps the PostToolUse one and skips the duplicate.
+$hook = 'PostToolUse'
+if ($hookEvent -match '"hook_event_name"\s*:\s*"PreToolUse"') { $hook = 'PreToolUse' }
+if ($hook -eq 'PreToolUse' -and $agent -ne 'junie') { exit 0 }
+
+$reason = & (Join-Path $root 'bin/continuum.ps1') check --session $sid --agent $agent
 $reason = ($reason | Out-String).Trim()
 if (-not $reason) { exit 0 }
 
 $reason = "Mid-turn usage check. Finish the step you are on and leave the work in a consistent state (commit or a note), then act on this: $reason"
 
-@{ hookSpecificOutput = @{ hookEventName = 'PostToolUse'; additionalContext = $reason } } | ConvertTo-Json -Compress
+@{ hookSpecificOutput = @{ hookEventName = $hook; additionalContext = $reason } } | ConvertTo-Json -Compress

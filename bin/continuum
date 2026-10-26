@@ -89,6 +89,7 @@ cnt_resume_preset() {
         gemini)   printf '%s' 'gemini --resume latest --approval-mode auto_edit -p "{prompt}"' ;;
         cursor)   printf '%s' 'agent -p --continue "{prompt}"' ;;
         opencode) printf '%s' 'opencode run --continue "{prompt}"' ;;
+        junie)    printf '%s' 'junie --skip-update-check --resume --task "{prompt}"' ;;
         *) return 1 ;;
     esac
 }
@@ -268,6 +269,9 @@ PLIST
 cnt_ask_hint() {
     case "$1" in
         claude) printf '%s' "Do not end the turn silently: run the session-budget skill - briefly state where we stopped, then use AskUserQuestion to ask the user how to spend the rest of the window, offering the options from that skill." ;;
+        # Junie has no question tool and its Stop hook fires right before it submits
+        # the task, so the question goes at the end of the final message.
+        junie)  printf '%s' "Do not end the task silently: run the session-budget skill - briefly state where we stopped, then end your final message by asking the user how to spend the rest of the window, offering the options from that skill. To schedule a resume: CONTINUUM_AGENT=junie continuum resume." ;;
         *)      printf '%s' "Do not end the turn silently: briefly state where we stopped, then ask the user how to spend the rest of the window - finish and wrap up, finish the current batch, save state and schedule a resume after the reset (continuum resume), frugal mode, cheap tasks only, or carry on." ;;
     esac
 }

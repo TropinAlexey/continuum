@@ -89,6 +89,7 @@ check "agent preset codex"       'codex exec resume --last'         "$(CONTINUUM
 check "agent preset gemini"      'gemini --resume latest'           "$(CONTINUUM_AGENT=gemini dry '' 'x')"
 check "agent preset cursor"      'agent -p --continue'      "$(CONTINUUM_AGENT=cursor dry '' 'x')"
 check "agent preset opencode"    'opencode run --continue'          "$(CONTINUUM_AGENT=opencode dry '' 'x')"
+check "agent preset junie"       'junie --skip-update-check --resume --task' "$(CONTINUUM_AGENT=junie dry '' 'x')"
 if (CONTINUUM_AGENT=nope dry '' 'x') >/dev/null 2>&1
 then bad "unknown agent without command fails" "exit 0"
 else ok  "unknown agent without command fails"; fi
@@ -242,7 +243,7 @@ cp "$ROOT/adapters/claude/statusline.sh" "$rp/copy/statusline.sh"
 i=0; while [ ! -f "$rp/state/.continuum-cache-mock" ] && [ $i -lt 20 ]; do sleep 0.2 2>/dev/null || sleep 1; i=$((i+1)); done
 [ -f "$rp/state/.continuum-cache-mock" ] && ok "copied statusline finds core via pointer" || bad "copied statusline finds core via pointer" "no cache refresh"
 cd_=$TMP/rp_claude; mkdir -p "$cd_/hooks"; printf '#!/bin/sh\n# continuum old\n' > "$cd_/hooks/statusline.sh"
-(CLAUDE_CONFIG_DIR="$cd_" CONTINUUM_STATE_DIR="$rp/state2" sh "$ROOT/adapters/claude/setup-statusline.sh" >/dev/null 2>&1)
+(CLAUDE_CONFIG_DIR="$cd_" CONTINUUM_STATE_DIR="$rp/state2" sh "$ROOT/adapters/claude/setup-statusline.sh" </dev/null >/dev/null 2>&1)
 cmp -s "$ROOT/adapters/claude/statusline.sh" "$cd_/hooks/statusline.sh" && ok "setup refreshes stale statusline copy" || bad "setup refreshes stale statusline copy" "not refreshed"
 check "setup records root pointer" "$ROOT" "$(cat "$rp/state2/root" 2>/dev/null)"
 
@@ -332,6 +333,23 @@ check "subagent does not use up the tier" "Mid-turn usage check" "$(tool mta '{"
 printf '{"session_id":"mtg"}' | CONTINUUM_STATE_DIR=/proc/nonexistent sh "$ROOT/adapters/claude/tool-check.sh" >/dev/null 2>&1 \
     && ok "mid-turn exit 0 on unwritable state dir" || bad "mid-turn exit 0 on unwritable state dir" "non-zero exit"
 grep -q 'adapters/claude/tool-check.sh' "$ROOT/hooks/hooks.json" && ok "hooks.json wires the mid-turn check" || bad "hooks.json wires the mid-turn check" "missing"
+
+echo "junie (runs the Claude plugin's hooks):"
+# Junie fires PreToolUse (no PostToolUse) and tags every event with project_path.
+[ -z "$(tool jc '{"hook_event_name":"PreToolUse","session_id":"jc","tool_name":"Bash"}')" ] && ok "claude skips the PreToolUse duplicate" || bad "claude skips the PreToolUse duplicate" "warned"
+out=$(tool jt '{"hook_event_name":"PreToolUse","session_id":"jt","project_path":"/p","tool_name":"Bash"}')
+check "junie mid-turn on PreToolUse"   '"hookEventName":"PreToolUse","additionalContext":"Mid-turn usage check.' "$out"
+check "junie gets its own hint"        'end your final message by asking' "$out"
+case "$out" in *AskUserQuestion*) bad "junie hint has no AskUserQuestion" "$out" ;; *) ok "junie hint has no AskUserQuestion" ;; esac
+out=$(hook js '{"hook_event_name":"Stop","session_id":"js","project_path":"/p","stop_hook_active":false}')
+check "junie stop blocks with its hint" '{"decision":"block","reason":"[continuum]' "$out"
+check "junie stop names the resume preset" 'CONTINUUM_AGENT=junie continuum resume' "$out"
+[ -z "$(hook js2 '{"session_id":"js2","project_path":"/p","stop_hook_active":true}')" ] && ok "junie respects stop_hook_active" || bad "junie respects stop_hook_active" "warned"
+jcd=$TMP/junie_claude; mkdir -p "$jcd"; printf '{\n  "model": "x"\n}\n' > "$jcd/settings.json"
+printf '{"hook_event_name":"SessionStart","project_path":"/p"}' | CLAUDE_CONFIG_DIR="$jcd" CONTINUUM_STATE_DIR="$TMP/jss" sh "$ROOT/adapters/claude/setup-statusline.sh" >/dev/null 2>&1
+grep -q statusLine "$jcd/settings.json" && bad "junie leaves Claude settings alone" "statusLine added" || ok "junie leaves Claude settings alone"
+printf '{"hook_event_name":"SessionStart"}' | CLAUDE_CONFIG_DIR="$jcd" CONTINUUM_STATE_DIR="$TMP/jss" sh "$ROOT/adapters/claude/setup-statusline.sh" >/dev/null 2>&1
+grep -q statusLine "$jcd/settings.json" && ok "claude SessionStart still sets the status line" || bad "claude SessionStart still sets the status line" "not added"
 
 echo "other agents:"
 # Every adapter: the reply shape its agent expects, the loop guard, the tier shared
@@ -445,6 +463,20 @@ check "statusline retries after backoff" "81%" "$sl_out"
 printf '5h 12.0 %s\n' "99999999999999999999999" > "$sf_dir/.continuum-cache-mock"
 sl_out=$(CONTINUUM_STATE_DIR="$sf_dir" CONTINUUM_MOCK_FAIL=1 sh "$ROOT/adapters/claude/statusline.sh" 2>/dev/null)
 check "statusline survives garbage epoch" "12%" "$sl_out"
+# 30s gate: a background refresh started seconds ago is not started again.
+sg_dir="$TMP/sl_gate"; mkdir -p "$sg_dir"; sg="$sg_dir/.continuum-cache-mock"
+printf '5h 12.0 %s\n7d 20.0 %s\n' "$d_reset" "$w_reset" > "$sg"; date +%s > "$sg.at"
+CONTINUUM_STATE_DIR="$sg_dir" CONTINUUM_MOCK="55.0 33.0" sh "$ROOT/adapters/claude/statusline.sh" >/dev/null 2>&1
+sleep 1; grep -q '^5h 12.0' "$sg" && ok "statusline gate holds within 30s" || bad "statusline gate holds within 30s" "refreshed: $(head -1 "$sg")"
+printf '%s' "$(( $(date +%s) - 60 ))" > "$sg.at"
+CONTINUUM_STATE_DIR="$sg_dir" CONTINUUM_MOCK="56.0 33.0" sh "$ROOT/adapters/claude/statusline.sh" >/dev/null 2>&1
+i=0; while ! grep -q '^5h 56.0' "$sg" && [ $i -lt 20 ]; do sleep 0.2 2>/dev/null || sleep 1; i=$((i+1)); done
+grep -q '^5h 56.0' "$sg" && ok "statusline refreshes after the gate" || bad "statusline refreshes after the gate" "$(head -1 "$sg")"
+# Leftover tmp files from a killed refresh are swept once old.
+: > "$sg.111.tmp"; touch -t 202001010000 "$sg.111.tmp"; : > "$sg.222.tmp"
+CONTINUUM_STATE_DIR="$sg_dir" sh "$ROOT/adapters/claude/statusline.sh" >/dev/null 2>&1
+[ ! -f "$sg.111.tmp" ] && ok "statusline sweeps old tmp files" || bad "statusline sweeps old tmp files" "left"
+[ -f "$sg.222.tmp" ] && ok "statusline keeps fresh tmp files" || bad "statusline keeps fresh tmp files" "removed"
 
 # Test config commands
 out=$(CONTINUUM_STATE_DIR="$sl_dir" sh "$ROOT/bin/continuum" statusline)

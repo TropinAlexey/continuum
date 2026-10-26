@@ -34,7 +34,17 @@ printf '%s' "$event" | grep -q '"agent_id"[[:space:]]*:' && exit 0
 sid=$(printf '%s' "$event" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"//; s/"$//')
 
 # Runs after every tool call: any failure means silence, never a hook error.
-reason=$(sh "$root/bin/continuum" check --session "${sid:-unknown}" --agent claude 2>/dev/null) || exit 0
+# Junie CLI installs this plugin from the marketplace and runs the same hooks; its
+# events carry project_path, Claude Code's do not.
+agent=claude
+printf '%s' "$event" | grep -q '"project_path"[[:space:]]*:' && agent=junie
+# Junie fires PreToolUse but not PostToolUse, so this hook is wired to both; Claude
+# Code keeps the PostToolUse one and skips the duplicate.
+hook=PostToolUse
+printf '%s' "$event" | grep -q '"hook_event_name"[[:space:]]*:[[:space:]]*"PreToolUse"' && hook=PreToolUse
+[ "$hook" = PreToolUse ] && [ "$agent" != junie ] && exit 0
+
+reason=$(sh "$root/bin/continuum" check --session "${sid:-unknown}" --agent "$agent" 2>/dev/null) || exit 0
 [ -n "$reason" ] || exit 0
 
 reason="Mid-turn usage check. Finish the step you are on and leave the work in a consistent state (commit or a note), then act on this: $reason"
@@ -42,4 +52,4 @@ reason="Mid-turn usage check. Finish the step you are on and leave the work in a
 # The provider controls window labels, which end up inside a JSON string. Escape it.
 esc_reason=$(printf '%s' "$reason" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\n\r')
 
-printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"%s"}}\n' "$esc_reason"
+printf '{"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' "$hook" "$esc_reason"

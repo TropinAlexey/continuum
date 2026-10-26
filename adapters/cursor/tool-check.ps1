@@ -7,7 +7,7 @@ if ($env:CONTINUUM_OFF) { exit 0 }
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'lib.ps1')
 $root = Get-CntAdapterRoot
 if (-not $root) { exit 0 }
-$event = [Console]::In.ReadToEnd()
-$reason = Get-CntAdapterWarning $root (Get-CntAdapterStr $event 'conversation_id') 'cursor'
+$hookEvent = [Console]::In.ReadToEnd()
+$reason = Get-CntAdapterWarning $root (Get-CntAdapterStr $hookEvent 'conversation_id') 'cursor'
 if (-not $reason) { exit 0 }
 @{ additional_context = $script:CntMidturnPrefix + $reason } | ConvertTo-Json -Compress

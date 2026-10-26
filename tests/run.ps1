@@ -66,7 +66,7 @@ if (Test-Path Env:CONTINUUM_RESUME_CMD) { Remove-Item Env:CONTINUUM_RESUME_CMD }
 
 $env:CONTINUUM_AGENT = 'claude'
 Check "agent preset claude" 'claude --continue' (Dry $null 'x')
-foreach ($pair in @(@('codex', 'codex exec resume --last'), @('gemini', 'gemini --resume latest'), @('cursor', 'agent -p --continue'), @('opencode', 'opencode run --continue'))) {
+foreach ($pair in @(@('codex', 'codex exec resume --last'), @('gemini', 'gemini --resume latest'), @('cursor', 'agent -p --continue'), @('opencode', 'opencode run --continue'), @('junie', 'junie --skip-update-check --resume --task'))) {
     $env:CONTINUUM_AGENT = $pair[0]
     Check "agent preset $($pair[0])" $pair[1] (Dry $null 'x')
 }
@@ -333,7 +333,7 @@ if ($wlFile) {
     $wlId = (Get-Content -Path $wlFile -Raw).Trim()
     $alive = $false
     if ($wlId -match '^job:(\d+)$') {
-        $alive = (Get-Job -Id ([int]$Matches[1]) -ErrorAction SilentlyContinue) -ne $null
+        $alive = $null -ne (Get-Job -Id ([int]$Matches[1]) -ErrorAction SilentlyContinue)
     } elseif ($wlId -match '^\d+$') {
         try { Get-Process -Id ([int]$wlId) -ErrorAction Stop | Out-Null; $alive = $true }
         catch { $alive = $false }
@@ -401,6 +401,16 @@ $env:CONTINUUM_OFF = '1'
 if (-not (Tool 'mto' '{"session_id":"mto"}')) { Ok "mid-turn respects CONTINUUM_OFF" } else { Bad "mid-turn respects CONTINUUM_OFF" "warned" }
 Remove-Item Env:CONTINUUM_OFF
 if ((Get-Content -Raw (Join-Path $root 'hooks/hooks.json')).Contains('adapters/claude/tool-check.sh')) { Ok "hooks.json wires the mid-turn check" } else { Bad "hooks.json wires the mid-turn check" "missing" }
+
+Write-Host "junie (runs the Claude plugin's hooks):"
+# Junie fires PreToolUse (no PostToolUse) and tags every event with project_path.
+if (-not (Tool 'jc' '{"hook_event_name":"PreToolUse","session_id":"jc","tool_name":"Bash"}')) { Ok "claude skips the PreToolUse duplicate" } else { Bad "claude skips the PreToolUse duplicate" "warned" }
+$out = Tool 'jt' '{"hook_event_name":"PreToolUse","session_id":"jt","project_path":"/p","tool_name":"Bash"}'
+Check "junie mid-turn on PreToolUse" '"hookEventName":"PreToolUse"' $out
+Check "junie gets its own hint" 'end your final message by asking' $out
+if ($out -notmatch 'AskUserQuestion') { Ok "junie hint has no AskUserQuestion" } else { Bad "junie hint has no AskUserQuestion" $out }
+$out = Hook 'js' '{"hook_event_name":"Stop","session_id":"js","project_path":"/p","stop_hook_active":false}'
+Check "junie stop names the resume preset" 'CONTINUUM_AGENT=junie continuum resume' $out
 $env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
 
 Write-Host "other agents:"
@@ -529,6 +539,13 @@ if (-not (Test-Path "$sfCache.retry")) { Ok "statusline success clears retry mar
 Set-Content -Path $sfCache -Value @("5h 12.0 99999999999999999999999")
 $env:CONTINUUM_MOCK = '82.0 33.0'
 Check "statusline survives garbage epoch" "12%" (Invoke-StatuslineHook)
+# Leftover tmp files from a killed refresh are swept once old.
+$oldTmp = "$sfCache.111.tmp"; $newTmp = "$sfCache.222.tmp"
+Set-Content -Path $oldTmp -Value ''; (Get-Item -Force $oldTmp).LastWriteTime = (Get-Date).AddHours(-1)
+Set-Content -Path $newTmp -Value ''
+Invoke-StatuslineHook | Out-Null
+if (-not (Test-Path $oldTmp)) { Ok "statusline sweeps old tmp files" } else { Bad "statusline sweeps old tmp files" "left" }
+if (Test-Path $newTmp) { Ok "statusline keeps fresh tmp files" } else { Bad "statusline keeps fresh tmp files" "removed" }
 Remove-Item Env:CONTINUUM_MOCK
 $env:CONTINUUM_STATE_DIR = $slDir
 

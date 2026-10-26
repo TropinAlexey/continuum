@@ -7,7 +7,7 @@ if ($env:CONTINUUM_OFF) { exit 0 }
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'lib.ps1')
 $root = Get-CntAdapterRoot
 if (-not $root) { exit 0 }
-$event = [Console]::In.ReadToEnd()
-$reason = Get-CntAdapterWarning $root (Get-CntAdapterStr $event 'session_id') 'codex'
+$hookEvent = [Console]::In.ReadToEnd()
+$reason = Get-CntAdapterWarning $root (Get-CntAdapterStr $hookEvent 'session_id') 'codex'
 if (-not $reason) { exit 0 }
 @{ hookSpecificOutput = @{ hookEventName = 'PostToolUse'; additionalContext = $script:CntMidturnPrefix + $reason } } | ConvertTo-Json -Compress

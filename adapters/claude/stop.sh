@@ -31,7 +31,11 @@ printf '%s' "$event" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true'
 sid=$(printf '%s' "$event" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"//; s/"$//')
 
 # A Stop hook that exits non-zero spams the user: any failure means silence.
-reason=$(sh "$root/bin/continuum" check --session "${sid:-unknown}" --agent claude 2>/dev/null) || exit 0
+# Junie CLI installs this plugin from the marketplace and runs the same hooks; its
+# events carry project_path, Claude Code's do not.
+agent=claude
+printf '%s' "$event" | grep -q '"project_path"[[:space:]]*:' && agent=junie
+reason=$(sh "$root/bin/continuum" check --session "${sid:-unknown}" --agent "$agent" 2>/dev/null) || exit 0
 [ -n "$reason" ] || exit 0
 
 # The provider controls window labels, which end up inside `reason`, which ends up

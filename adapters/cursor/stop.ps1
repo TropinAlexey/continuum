@@ -8,12 +8,12 @@ if ($env:CONTINUUM_OFF) { exit 0 }
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'lib.ps1')
 $root = Get-CntAdapterRoot
 if (-not $root) { exit 0 }
-$event = [Console]::In.ReadToEnd()
+$hookEvent = [Console]::In.ReadToEnd()
 # Only after a turn that completed, and never inside our own follow-up loop.
-$status = Get-CntAdapterStr $event 'status'
+$status = Get-CntAdapterStr $hookEvent 'status'
 if ($status -and $status -ne 'completed') { exit 0 }
-$loop = Get-CntAdapterNum $event 'loop_count'
+$loop = Get-CntAdapterNum $hookEvent 'loop_count'
 if ($loop -and $loop -gt 0) { exit 0 }
-$reason = Get-CntAdapterWarning $root (Get-CntAdapterStr $event 'conversation_id') 'cursor'
+$reason = Get-CntAdapterWarning $root (Get-CntAdapterStr $hookEvent 'conversation_id') 'cursor'
 if (-not $reason) { exit 0 }
 @{ followup_message = $reason } | ConvertTo-Json -Compress

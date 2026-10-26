@@ -7,7 +7,7 @@ if ($env:CONTINUUM_OFF) { exit 0 }
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'lib.ps1')
 $root = Get-CntAdapterRoot
 if (-not $root) { exit 0 }
-$event = [Console]::In.ReadToEnd()
-$reason = Get-CntAdapterWarning $root (Get-CntAdapterStr $event 'session_id') 'gemini'
+$hookEvent = [Console]::In.ReadToEnd()
+$reason = Get-CntAdapterWarning $root (Get-CntAdapterStr $hookEvent 'session_id') 'gemini'
 if (-not $reason) { exit 0 }
 @{ hookSpecificOutput = @{ hookEventName = 'AfterTool'; additionalContext = $script:CntMidturnPrefix + $reason } } | ConvertTo-Json -Compress

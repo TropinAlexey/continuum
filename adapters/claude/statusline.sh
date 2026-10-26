@@ -55,10 +55,21 @@ if [ -n "$root" ]; then
         else
             rm -f "$_tmp"; : > "$_retry" 2>/dev/null || true
         fi
-    elif [ ! -f "$cache" ] || [ -z "$(find "$cache" -mmin -0.5 2>/dev/null)" ]; then
-        mkdir -p "$CNT_STATE" 2>/dev/null || true
-        (CNT_ROOT="$root" . "$root/lib/core.sh" && cnt_read > "$_tmp" 2>/dev/null && mv "$_tmp" "$cache" || rm -f "$_tmp") &
+    else
+        # 30s gate on the last background refresh, kept as an epoch in $cache.at:
+        # `find -mmin -0.5` is not portable (bfs, the macOS find, rejects it and the
+        # gate stayed open, one provider call per render).
+        _now=$(date +%s)
+        _at=$(cat "$cache.at" 2>/dev/null || true)
+        case "$_at" in ''|*[!0-9]*|?????????????*) _at=0 ;; esac
+        if [ ! -f "$cache" ] || [ $((_now - _at)) -ge 30 ] || [ "$_at" -gt "$_now" ]; then
+            mkdir -p "$CNT_STATE" 2>/dev/null || true
+            printf '%s' "$_now" > "$cache.at" 2>/dev/null || true
+            (CNT_ROOT="$root" . "$root/lib/core.sh" && cnt_read > "$_tmp" 2>/dev/null && mv "$_tmp" "$cache" || rm -f "$_tmp") &
+        fi
     fi
+    # A refresh killed before its mv leaves $cache.<pid>.tmp behind; sweep old ones.
+    find "$CNT_STATE" -maxdepth 1 -name "${cache##*/}.*.tmp" -mmin +10 -exec rm -f {} + 2>/dev/null || true
 fi
 
 [ -f "$cache" ] || exit 0

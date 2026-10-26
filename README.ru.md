@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.1-brightgreen.svg" alt="version: 0.7.0"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.2-brightgreen.svg" alt="version: 0.7.0"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -51,7 +51,7 @@ irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | 
 - **Сеть.** В сеть ходит только провайдер. Провайдер по умолчанию, `anthropic`, делает один `GET https://api.anthropic.com/api/oauth/usage` с OAuth-токеном в заголовке `Authorization`. Это **недокументированный эндпоинт**, не публичный API, и он может измениться. Ответ кэшируется на 10 минут. Необязательный провайдер `spend` обращается к `https://api.anthropic.com/v1/billing/usage` с `ANTHROPIC_ADMIN_KEY`. Больше ничего с машины не уходит.
 - **Учётные данные.** Провайдер `anthropic` ищет токен в таком порядке: `$CLAUDE_CODE_OAUTH_TOKEN`, запись `Claude Code-credentials` в Keychain macOS, затем `~/.claude/.credentials.json`. Он уходит только на `api.anthropic.com` и нигде не сохраняется.
 - **Файлы.** Кэш, флаги, логи и конфиг лежат в `~/.local/state/continuum` (см. [Настройка](#настройка)). CLI-инсталлятор кладёт код в `~/.continuum`, а символическую ссылку на него — в каталог из `PATH`.
-- **Запуск без присмотра.** `continuum resume` запускает агента, когда никто не смотрит, по пресету агента или по `CONTINUUM_RESUME_CMD`. Запуск происходит только по твоему выбору: вариант «сохранить и продолжить» или ручной вызов команды. Ставь узкую задачу и не направляй его на то, что не дал бы мержить незнакомцу.
+- **Запуск без присмотра.** `continuum resume` запускает агента, когда никто не смотрит, по пресету агента или по `CONTINUUM_RESUME_CMD`; внутри треда bb вместо этого отправляет задачу в тот же тред через `bb thread tell`. Запуск происходит только по твоему выбору: вариант «сохранить и продолжить» или ручной вызов команды. Ставь узкую задачу и не направляй его на то, что не дал бы мержить незнакомцу.
 
 ## Что происходит
 
@@ -97,6 +97,7 @@ continuum resume "$(continuum reset)" "$PWD" "доделать тесты Docume
 | **Gemini CLI** | [адаптер](#gemini-cli), `settings.json` | `CONTINUUM_AGENT=gemini` | Новый: тесты в CI, вживую ещё не запускался |
 | **Cursor** | [адаптер](#cursor), `hooks.json` | `CONTINUUM_AGENT=cursor` | Новый: тесты в CI, вживую ещё не запускался |
 | **opencode** | [адаптер](#opencode), JS-плагин | `CONTINUUM_AGENT=opencode` | Новый: тесты в CI, вживую ещё не запускался |
+| **Junie** (JetBrains: RustRover, IDEA, …) | плагин Claude Code, установленный как расширение Junie ([Junie](#junie-jetbrains)) | `CONTINUUM_AGENT=junie` | Новый: проверен вживую (CLI); чат в IDE хуки пока не вызывает |
 | **bb** (приложение) | адаптер агента, запущенного в треде ([bb](#bb)) | автоматически: `bb thread tell` в тот же тред | Новый: тесты в CI, вживую ещё не запускался |
 | Любой другой | `continuum check` из хука или `continuum watch` в отдельной панели | задай `CONTINUUM_RESUME_CMD` | Работает уже сейчас |
 
@@ -272,6 +273,10 @@ continuum statusline reset              # вернуть настройки по
 
 Адаптер — плагин [`adapters/opencode/continuum.js`](adapters/opencode/README.md). На `session.idle` он отправляет предупреждение в сессию как промпт, после каждого вызова инструмента дописывает его к выводу инструмента. Ставится символической ссылкой в `~/.config/opencode/plugins/`, как показано в README адаптера. Он запускает только `continuum check`. Пресет resume: `opencode run --continue "<задача>"`.
 
+## Junie (JetBrains)
+
+Junie CLI ставит плагины Claude Code как расширения и запускает их хуки, поэтому continuum работает в нём как есть: в Junie `/extensions`, добавь маркетплейс `https://github.com/TropinAlexey/continuum`, установи `continuum`. Адаптер Claude Code узнаёт Junie по полю `project_path` в событиях: предупреждение просит Junie закончить итоговое сообщение вопросом (инструмента вопроса у неё нет), проверка внутри хода идёт на `PreToolUse` (`PostToolUse` у Junie нет), настройки Claude Code не трогаются. Пресет resume: `junie --skip-update-check --resume --task "<задача>"`. В IDE (RustRover, IntelliJ IDEA, Rider, …) агента для AI-чата выбираешь сам; Junie там идёт через ACP, а он хуки пока не вызывает, другие агенты чата ещё не проверены: используй Junie CLI или Claude Code в терминале IDE, либо `continuum watch`. Подробно — [`adapters/junie/`](adapters/junie/README.md).
+
 ## bb
 
 bb — десктоп-приложение, которое запускает агентов в тредах, поэтому предупреждение приходит от адаптера самого агента: треды Claude Code подгружают плагины, включённые в `~/.claude/settings.json` (поставь плагин [Claude Code](#claude-code)), треды Codex читают `~/.codex/hooks.json` ([Codex CLI](#codex-cli)). bb передаёт агенту `BB_THREAD_ID`; если он задан, `continuum resume` отправляет задачу обратно в тот же тред через `bb thread tell <id> "<задача>"`, а не запускает отдельную headless-сессию (bb должен быть запущен в момент сброса; `CONTINUUM_RESUME_CMD` по-прежнему главнее). Подробно — [`adapters/bb/`](adapters/bb/README.md).
@@ -279,8 +284,8 @@ bb — десктоп-приложение, которое запускает а
 ## Участие
 
 ```
-sh tests/run.sh          # 165 тестов, mock-провайдер, без сети (проходит и под dash)
-pwsh tests/run.ps1       # 141 тест, та же сюита для PowerShell
+sh tests/run.sh          # 179 тестов, mock-провайдер, без сети (проходит и под dash)
+pwsh tests/run.ps1       # 149 тестов, та же сюита для PowerShell
 ```
 
 Каждая правка `.sh` дублируется в `.ps1`, с тестами в обе сюиты. Пригодится помощь с провайдером для другого бюджета (OpenAI, Gemini: см. [docs/writing-a-provider.md](docs/writing-a-provider.md)) и с адаптером для другого агента ([docs/harnesses.md](docs/harnesses.md)).

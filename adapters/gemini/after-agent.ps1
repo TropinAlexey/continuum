@@ -7,9 +7,9 @@ if ($env:CONTINUUM_OFF) { exit 0 }
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'lib.ps1')
 $root = Get-CntAdapterRoot
 if (-not $root) { exit 0 }
-$event = [Console]::In.ReadToEnd()
+$hookEvent = [Console]::In.ReadToEnd()
 # Never deny again while Gemini is already retrying because of a hook.
-if (Test-CntAdapterTrue $event 'stop_hook_active') { exit 0 }
-$reason = Get-CntAdapterWarning $root (Get-CntAdapterStr $event 'session_id') 'gemini'
+if (Test-CntAdapterTrue $hookEvent 'stop_hook_active') { exit 0 }
+$reason = Get-CntAdapterWarning $root (Get-CntAdapterStr $hookEvent 'session_id') 'gemini'
 if (-not $reason) { exit 0 }
 @{ decision = 'deny'; reason = $reason } | ConvertTo-Json -Compress

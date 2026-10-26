@@ -44,8 +44,8 @@
 ## Команды
 
 ```sh
-sh tests/run.sh          # 160 тестов, mock, без сети (эталон; проходит и под dash)
-pwsh tests/run.ps1       # 136 тестов, та же сюита для PowerShell
+sh tests/run.sh          # 179 тестов, mock, без сети (эталон; проходит и под dash)
+pwsh tests/run.ps1       # 149 тестов, та же сюита для PowerShell
 continuum status         # 5h 86.5% resets at 21:40 + weekly строка
 continuum reset          # HH:MM ресета (+90s, для планировщика)
 continuum estimate       # сколько осталось at this pace
@@ -56,6 +56,8 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
 ```
 
 ## Текущее состояние (2026-10-26)
+
+- **v0.7.2 — Junie (JetBrains) + фиксы**: Junie CLI ставит Claude-плагины как расширения и гоняет их `hooks/hooks.json` (`${CLAUDE_PLUGIN_ROOT}`), так что отдельных скриптов нет — Claude-адаптер узнаёт Junie по `project_path` в событии → `--agent junie` (свой hint: вопрос в конце итогового сообщения, без AskUserQuestion). Junie не шлёт `PostToolUse` → `tool-check.sh` подключён и на `PreToolUse` (в Claude сразу выходит). `setup-statusline.sh` в Junie ничего не делает. Пресет `junie --skip-update-check --resume --task "{prompt}"`. Вживую (Junie CLI 26.10.20, batch): Stop-предупреждение дошло, `--resume --task` продолжает ту же сессию. В IDE (RustRover и др.) агент чата — по выбору, всё через ACP: Junie там хуки не вызывает (их доки), Claude Agent / Codex в чате ещё не проверены (беклог: если их ACP-мост грузит пользовательские хуки, как Agent SDK в bb, — работает без доработок). Доки `adapters/junie/README.md`. Плюс фиксы: 30-сек гейт statusline — метка `$cache.at` вместо `find -mmin -0.5` (bfs на macOS его не понимал → запрос на каждую отрисовку); уборка `$cache.<pid>.tmp` старше 10 мин (sh + ps1); PSScriptAnalyzer: `$event`→`$hookEvent` (автопеременная), `Invoke-History`→`Invoke-CntHistory` (перекрывал командлет); CI `actions/checkout@v5`. RustRover подключён к Claude Code как MCP `rustrover` (`http://127.0.0.1:64522/stream`, как `rider`). **Тесты: sh 179/179 (и под dash), ps 149/149.**
 
 - **v0.7.1 — bb + сброс недельного окна**: bb (`/Applications/bb.app`, CLI `~/.bb/bin/bb`) — оболочка над агентами, своих хуков не нужно: треды Claude Code идут через Agent SDK с `settingSources: user/project/local` (`~/.bb/plugin-host-artifacts/provider-claude-code/*/host.mjs`) → плагин continuum подгружается; Codex читает свои хуки. В ядре: при `BB_THREAD_ID` (bb ставит его агенту) `continuum resume` → `<абсолютный путь>/bb thread tell <id> "{prompt}"` (после `CONTINUUM_RESUME_CMD`, до пресета агента; id валидируется `[A-Za-z0-9_-]`; путь абсолютный, т.к. у launchd короткий PATH). Доки `adapters/bb/README.md`. По отзыву 2026-10-26: предупреждение недельного окна называет его сброс («resets Fri 18:28», `cnt_epoch_dayhhmm` / `ConvertTo-CntDayHhmm`). **Тесты: sh 165/165 (и под dash), ps 141/141.** bb вживую не проверен. В репо подключён RustRover (`.idea/`).
 
@@ -84,13 +86,13 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
    - ~~Проверка порога внутри хода~~ — сделано 2026-10-23 (`tool-check.sh`, PostToolUse). Не сделано: отдельный жёсткий блок `Agent` выше порога — посмотреть по отзывам, хватает ли мягкого предупреждения.
    - **`continuum doctor`**: подключённый коммит, включён ли плагин (`enabledPlugins`), legacy-хуки (`token-budget-check.sh`, `~/.claude/lib/usage.sh`), дрейф копии statusline + одна команда миграции. Связано с п.4.
    - **Auto-resume по 429 внутри хода**: у Claude Code есть событие `StopFailure` (matcher `rate_limit`), без decision control — спросить пользователя нельзя. Вариант: по нему писать заметку/уведомление «лимит, сброс в HH:MM, `continuum resume …`», а не планировать молча (resume без согласия нарушает принцип «не решать за пользователя»).
-   - **Мусор `*.tmp`**: фоновый refresh в `statusline.sh` оставляет 0-байтный `$cache.$$.tmp`, если процесс убит до `mv`. Чистить tmp старше N мин при отрисовке (sh + ps1 + тесты).
+   - ~~Мусор `*.tmp`~~ — сделано в v0.7.2.
 1. **Живая проверка новых адаптеров** (Codex, Gemini, Cursor, opencode): по одной сессии с `CONTINUUM_THRESHOLD=10 CONTINUUM_TIERS=10` + mock-провайдер; по итогам — строка «run live» в README/harnesses. Отдельно: есть ли у агентов инструмент вопроса (тогда строка в `cnt_ask_hint`).
 2. ~~Адаптеры Codex / opencode / Cursor / Gemini~~ — сделано 2026-10-24, v0.7.0.
 3. —
 4. **`continuum install --agent <x>`** + доки (подпроект 5); заодно проверить marketplace-установку с нуля.
 5. **Новый провайдер** — OpenAI или Gemini по `docs/writing-a-provider.md` (отдельная ось от агентов).
-6. Мелочи: `continuum cleanup` от `.DS_Store`-мусора? 30-сек гейт statusline на `bfs` не работает (`-mmin -0.5` → ошибка → фоновый запрос на каждую отрисовку) — заменить на портируемое сравнение mtime. CI: `actions/checkout@v4` на Node 20 (deprecated), PSScriptAnalyzer из PSGallery иногда не ставится.
+6. Мелочи: `continuum cleanup` от `.DS_Store`-мусора? ~~30-сек гейт на bfs, checkout@v4~~ — сделано в v0.7.2. PSScriptAnalyzer из PSGallery иногда не ставится.
 
 ## Feedback от агентов (обязательно)
 
