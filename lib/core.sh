@@ -202,6 +202,15 @@ cnt_epoch_hhmm() {
     return 1
 }
 
+# Same, with the weekday ("Thu 09:00"): a weekly window resets days away, HH:MM alone
+# would read as today. C locale keeps the hook text in English.
+cnt_epoch_dayhhmm() {
+    case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac
+    LC_ALL=C date -r "$1" '+%a %H:%M' 2>/dev/null && return 0    # BSD
+    LC_ALL=C date -d "@$1" '+%a %H:%M' 2>/dev/null && return 0   # GNU
+    return 1
+}
+
 # cnt_num 09 -> 9 ; cnt_num 00 -> 0   (strip leading zeros, keep arithmetic sane)
 cnt_num() {
     v=$(printf '%s' "$1" | sed 's/^0*//')

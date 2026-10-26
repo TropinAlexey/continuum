@@ -69,8 +69,9 @@ function Invoke-Reset {
 }
 
 # Which agent to wake up. {prompt} is replaced with the task description.
-# CONTINUUM_RESUME_CMD wins; otherwise the preset for CONTINUUM_AGENT (default claude).
-# Presets arrive with each agent's adapter, once its headless flags are verified.
+# CONTINUUM_RESUME_CMD wins; then the bb thread (BB_THREAD_ID); otherwise the preset
+# for CONTINUUM_AGENT (default claude). Presets arrive with each agent's adapter,
+# once its headless flags are verified.
 function Get-CntResumePreset {
     param([string]$Agent)
     switch ($Agent) {
@@ -83,8 +84,29 @@ function Get-CntResumePreset {
     }
 }
 
+# Inside a bb thread (bb.app sets BB_THREAD_ID for the agent it runs) the resume goes
+# back into that same thread, not into a separate headless session. The id is baked in
+# now: the scheduled job runs later without the agent's environment.
+function Get-CntBbResume {
+    $id = $env:BB_THREAD_ID
+    if (-not $id -or $id -notmatch '^[A-Za-z0-9_-]+$') { return $null }
+    # Absolute path: the scheduled job may run with a shorter PATH than this shell.
+    # Unquoted in the template, so a path with a space falls back to the bare name.
+    $bb = ''
+    $cmd = Get-Command bb -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { $bb = $cmd.Source }
+    if (-not $bb) {
+        $home_bb = Join-Path (Join-Path $HOME '.bb') (Join-Path 'bin' 'bb')
+        if (Test-Path $home_bb) { $bb = $home_bb }
+    }
+    if (-not $bb -or $bb -match ' ') { $bb = 'bb' }
+    return "$bb thread tell $id `"{prompt}`""
+}
+
 function Get-CntResumeCmd {
     if ($env:CONTINUUM_RESUME_CMD) { return $env:CONTINUUM_RESUME_CMD }
+    $bb = Get-CntBbResume
+    if ($bb) { return $bb }
     $agent = 'claude'
     if ($env:CONTINUUM_AGENT) { $agent = $env:CONTINUUM_AGENT }
     $preset = Get-CntResumePreset $agent
@@ -298,10 +320,16 @@ function Invoke-Check {
         }
         if ($weeklyNew) {
             Set-Content -Path $flag7 -Value $tier7
+            $when7 = ''
+            $p7 = $lines[1].Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+            if ($p7.Count -ge 3 -and $p7[2] -match '^[0-9]+$') {
+                try { $when7 = ConvertTo-CntDayHhmm ([int64]$p7[2]) } catch { $when7 = '' }
+            }
+            $resets7 = if ($when7) { ", resets $when7" } else { '' }
             if ($reason) {
-                $reason += ". The weekly window also crossed the $tier7% tier ($util7Int% used)"
+                $reason += ". The weekly window also crossed the $tier7% tier ($util7Int% used$resets7)"
             } else {
-                $reason = "[continuum] The weekly window is $util7Int% used (crossed the $tier7% tier)"
+                $reason = "[continuum] The weekly window is $util7Int% used (crossed the $tier7% tier)$resets7"
                 if ($when) { $reason += ". Primary: $utilInt%, resets at $when" }
             }
         }

@@ -27,7 +27,8 @@ No plugin, no config, no hook. Works with Claude Code, Codex, OpenCode, Aider, C
 
 ## Which agent gets resumed
 
-`continuum resume` runs `CONTINUUM_RESUME_CMD` if set, otherwise the preset for
+`continuum resume` runs `CONTINUUM_RESUME_CMD` if set; inside a bb thread (`BB_THREAD_ID`
+set) it sends the task back into that thread with `bb thread tell`; otherwise the preset for
 `CONTINUUM_AGENT` (default `claude`). An agent without a preset and without
 `CONTINUUM_RESUME_CMD` is an error, never a silent fallback to Claude. `{prompt}` is replaced
 with the task description; if you leave the placeholder out, the command runs as written.

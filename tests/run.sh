@@ -8,6 +8,8 @@ TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 # State goes to $TMP, never to the real home: every test that needs its own
 # state dir overrides CONTINUUM_STATE_DIR.
 export CLAUDE_PLUGIN_ROOT="$ROOT" CONTINUUM_PROVIDER=mock CONTINUUM_STATE_DIR="$TMP/state"
+# The suite may itself run inside a bb thread; resume presets must not see it.
+unset BB_THREAD_ID
 
 pass=0; fail=0
 ok()   { pass=$((pass+1)); printf '  ok   %s\n' "$1"; }
@@ -91,6 +93,9 @@ if (CONTINUUM_AGENT=nope dry '' 'x') >/dev/null 2>&1
 then bad "unknown agent without command fails" "exit 0"
 else ok  "unknown agent without command fails"; fi
 check "explicit command beats preset" 'sh exec "y.'  "$(CONTINUUM_AGENT=nope dry 'sh exec "{prompt}"' 'y')"
+check "bb thread beats agent preset" 'thread tell th_1-A "x.'  "$(BB_THREAD_ID=th_1-A CONTINUUM_AGENT=codex dry '' 'x')"
+check "explicit command beats bb thread" 'sh exec "y.'  "$(BB_THREAD_ID=th_1 dry 'sh exec "{prompt}"' 'y')"
+check "unsafe bb thread id ignored" 'claude --continue'  "$(BB_THREAD_ID='t;rm -rf' dry '' 'x')"
 # No dry run here: the PATH check only runs on the real scheduling path.
 if CONTINUUM_RESUME_CMD='nosuchagent {prompt}' sh "$ROOT/bin/continuum" resume 23:59 "$ROOT" x >/dev/null 2>&1
 then bad "missing agent fails" "exit 0"
@@ -263,10 +268,13 @@ echo "weekly tiers:"
 # Weekly window crosses its tier independently of primary (primary at 50% = below 80% floor)
 out=$(CONTINUUM_CACHE_MIN=0 CONTINUUM_MOCK="50.0 75.0" hook wk7 '{"session_id":"wk7"}')
 check "weekly tier fires"  "weekly window" "$out"
+case "$out" in *"tier), resets "[A-Z][a-z][a-z]" "[0-2][0-9]:[0-5][0-9]*) ok "weekly reset day+time" ;; *) bad "weekly reset day+time" "$out" ;; esac
 out=$(CONTINUUM_CACHE_MIN=0 CONTINUUM_MOCK="50.0 75.0" hook wk7 '{"session_id":"wk7"}')
 [ -z "$out" ] && ok "weekly same tier quiet" || bad "weekly same tier quiet" "$out"
 out=$(CONTINUUM_CACHE_MIN=0 CONTINUUM_MOCK="50.0 90.0" hook wk7 '{"session_id":"wk7"}')
 check "weekly next tier fires" "weekly window" "$out"
+out=$(CONTINUUM_CACHE_MIN=0 CONTINUUM_MOCK="96.0 96.0" hook wk7b '{"session_id":"wk7b"}')
+case "$out" in *"also crossed the 95% tier (96% used, resets "[A-Z][a-z][a-z]" "*) ok "weekly reset in combined warning" ;; *) bad "weekly reset in combined warning" "$out" ;; esac
 
 echo "wakelock:"
 wl_wrap=$(. "$ROOT/lib/core.sh" && cnt_wakelock_wrap)

@@ -6,6 +6,8 @@ $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 $env:CLAUDE_PLUGIN_ROOT = $root
 $env:CONTINUUM_PROVIDER = 'mock'
+# The suite may itself run inside a bb thread; resume presets must not see it.
+Remove-Item Env:BB_THREAD_ID -ErrorAction SilentlyContinue
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("continuum-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 # State goes to $tmp, never to the real home: tests that need their own state
@@ -74,6 +76,13 @@ Invoke-Continuum resume '23:59' $root 'x' *>$null
 if ($LASTEXITCODE -ne 0) { Ok "unknown agent without command fails" } else { Bad "unknown agent without command fails" "exit 0" }
 Remove-Item Env:CONTINUUM_DRY_RUN
 Check "explicit command beats preset" 'pwsh exec "y' (Dry 'pwsh exec "{prompt}"' 'y')
+$env:BB_THREAD_ID = 'th_1-A'
+Check "bb thread beats agent preset" 'thread tell th_1-A "x' (Dry $null 'x')
+Check "explicit command beats bb thread" 'pwsh exec "y' (Dry 'pwsh exec "{prompt}"' 'y')
+$env:BB_THREAD_ID = 't;rm -rf'
+$env:CONTINUUM_AGENT = 'claude'
+Check "unsafe bb thread id ignored" 'claude --continue' (Dry $null 'x')
+Remove-Item Env:BB_THREAD_ID
 Remove-Item Env:CONTINUUM_AGENT
 if (Test-Path Env:CONTINUUM_RESUME_CMD) { Remove-Item Env:CONTINUUM_RESUME_CMD }
 
@@ -300,11 +309,15 @@ $env:CONTINUUM_CACHE_MIN = '0'
 $env:CONTINUUM_MOCK = '50.0 75.0'
 $out = Hook 'wk7' '{"session_id":"wk7"}'
 Check "weekly tier fires" "weekly window" $out
+if ("$out" -match 'tier\), resets [A-Z][a-z]{2} [0-2][0-9]:[0-5][0-9]') { Ok "weekly reset day+time" } else { Bad "weekly reset day+time" "$out" }
 $out = Hook 'wk7' '{"session_id":"wk7"}'
 if (-not $out) { Ok "weekly same tier quiet" } else { Bad "weekly same tier quiet" $out }
 $env:CONTINUUM_MOCK = '50.0 90.0'
 $out = Hook 'wk7' '{"session_id":"wk7"}'
 Check "weekly next tier fires" "weekly window" $out
+$env:CONTINUUM_MOCK = '96.0 96.0'
+$out = Hook 'wk7b' '{"session_id":"wk7b"}'
+if ("$out" -match 'also crossed the 95% tier \(96% used, resets [A-Z][a-z]{2} ') { Ok "weekly reset in combined warning" } else { Bad "weekly reset in combined warning" "$out" }
 Remove-Item Env:CONTINUUM_MOCK
 Remove-Item Env:CONTINUUM_CACHE_MIN
 

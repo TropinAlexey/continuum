@@ -145,6 +145,14 @@ function ConvertTo-CntHhmm {
     return $dt.ToString('HH:mm')
 }
 
+# Same, with the weekday ("Thu 09:00"): a weekly window resets days away, HH:MM alone
+# would read as today. Invariant culture keeps the hook text in English.
+function ConvertTo-CntDayHhmm {
+    param([int64]$Epoch)
+    $dt = [datetimeoffset]::FromUnixTimeSeconds($Epoch).ToLocalTime()
+    return $dt.ToString('ddd HH:mm', [Globalization.CultureInfo]::InvariantCulture)
+}
+
 # "19:40" -> seconds until the next local occurrence of that time
 function Get-CntHhmmDelay {
     param([string]$Hhmm)

@@ -78,8 +78,9 @@ cmd_reset() {
 }
 
 # Which agent to wake up. {prompt} is replaced with the task description.
-# CONTINUUM_RESUME_CMD wins; otherwise the preset for CONTINUUM_AGENT (default claude).
-# Presets arrive with each agent's adapter, once its headless flags are verified.
+# CONTINUUM_RESUME_CMD wins; then the bb thread (BB_THREAD_ID); otherwise the preset
+# for CONTINUUM_AGENT (default claude). Presets arrive with each agent's adapter,
+# once its headless flags are verified.
 # NB: not ${VAR:-default} - the `}` inside `{prompt}` would close the expansion early.
 cnt_resume_preset() {
     case "$1" in
@@ -92,8 +93,23 @@ cnt_resume_preset() {
     esac
 }
 
+# Inside a bb thread (bb.app sets BB_THREAD_ID for the agent it runs) the resume goes
+# back into that same thread, not into a separate headless session. The id is baked in
+# now: the scheduled job runs later without the agent's environment.
+cnt_bb_resume() {
+    case "${BB_THREAD_ID:-}" in ''|*[!A-Za-z0-9_-]*) return 1 ;; esac
+    # Absolute path: launchd runs the job with PATH=/usr/bin:/bin:..., where a `bb`
+    # found through the login shell's PATH (~/.bb/bin) is gone. Unquoted in the
+    # template, so a path with a space falls back to the bare name.
+    _bb=$(command -v bb 2>/dev/null || true)
+    [ -z "$_bb" ] && [ -x "$HOME/.bb/bin/bb" ] && _bb="$HOME/.bb/bin/bb"
+    case "$_bb" in ''|*' '*) _bb=bb ;; esac
+    printf '%s thread tell %s "{prompt}"' "$_bb" "$BB_THREAD_ID"
+}
+
 cnt_resume_cmd() {
     [ -n "${CONTINUUM_RESUME_CMD:-}" ] && { printf '%s' "$CONTINUUM_RESUME_CMD"; return 0; }
+    cnt_bb_resume && return 0
     _agent="${CONTINUUM_AGENT:-claude}"
     cnt_resume_preset "$_agent" && return 0
     echo "no resume preset for agent '$_agent' - set CONTINUUM_RESUME_CMD, e.g. 'myagent run \"{prompt}\"'" >&2
@@ -388,10 +404,12 @@ cmd_check() {
     fi
     if [ "$weekly_new" = true ]; then
         printf '%s' "$tier7" > "$flag7.tmp" && mv "$flag7.tmp" "$flag7"
+        reset7=$(printf '%s' "$line2" | awk '{print $3}')
+        when7=$(cnt_epoch_dayhhmm "$reset7" 2>/dev/null || echo "")
         if [ -n "$reason" ]; then
-            reason="${reason}. The weekly window also crossed the ${tier7}% tier (${util7_i}% used)"
+            reason="${reason}. The weekly window also crossed the ${tier7}% tier (${util7_i}% used${when7:+, resets ${when7}})"
         else
-            reason="[continuum] The weekly window is ${util7_i}% used (crossed the ${tier7}% tier)"
+            reason="[continuum] The weekly window is ${util7_i}% used (crossed the ${tier7}% tier)${when7:+, resets ${when7}}"
             [ -n "$when" ] && reason="${reason}. Primary: ${util_i}%${when:+, resets at ${when}}"
         fi
     fi

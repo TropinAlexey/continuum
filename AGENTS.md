@@ -55,7 +55,9 @@ continuum check --session ID --agent claude  # ядро предупрежден
 continuum resume "$(continuum reset)" "$PWD" "конкретная задача"  # NEVER generic "continue"
 ```
 
-## Текущее состояние (2026-10-24)
+## Текущее состояние (2026-10-26)
+
+- **v0.7.1 — bb + сброс недельного окна**: bb (`/Applications/bb.app`, CLI `~/.bb/bin/bb`) — оболочка над агентами, своих хуков не нужно: треды Claude Code идут через Agent SDK с `settingSources: user/project/local` (`~/.bb/plugin-host-artifacts/provider-claude-code/*/host.mjs`) → плагин continuum подгружается; Codex читает свои хуки. В ядре: при `BB_THREAD_ID` (bb ставит его агенту) `continuum resume` → `<абсолютный путь>/bb thread tell <id> "{prompt}"` (после `CONTINUUM_RESUME_CMD`, до пресета агента; id валидируется `[A-Za-z0-9_-]`; путь абсолютный, т.к. у launchd короткий PATH). Доки `adapters/bb/README.md`. По отзыву 2026-10-26: предупреждение недельного окна называет его сброс («resets Fri 18:28», `cnt_epoch_dayhhmm` / `ConvertTo-CntDayHhmm`). **Тесты: sh 165/165 (и под dash), ps 141/141.** bb вживую не проверен. В репо подключён RustRover (`.idea/`).
 
 - **v0.7.0 — адаптеры Codex CLI, Gemini CLI, Cursor, opencode** (подпроекты 2–4): протоколы взяты из официальных доков (Codex `Stop` block / `PostToolUse` additionalContext; Gemini `AfterAgent` deny / `AfterTool` additionalContext; Cursor `stop` followup_message / `postToolUse` additional_context; opencode `session.idle` → `client.session.prompt`, `tool.execute.after` → дописать в output). Пресеты resume для всех четырёх (Codex сверен с `codex exec resume --help` 0.164.0; остальные — по докам). Cursor без `--force` (ревью безопасности: `--force` = любые команды без присмотра; opt-in через `CONTINUUM_RESUME_CMD`). **Вживую ни один не запускался** — локально есть только opencode, а в нём только платные OpenRouter/xAI. **Тесты: sh 160/160 (и под dash), ps 136/136.**
 

@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.0-brightgreen.svg" alt="version: 0.7.0"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.1-brightgreen.svg" alt="version: 0.7.0"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -61,7 +61,7 @@ When usage crosses a threshold, your agent stops and asks:
 
 The options are: wrap up, finish the current batch, save and auto-resume, frugal mode (no subagents), cheap tasks only, or ignore. The agent asks in your language.
 
-Warnings come in tiers, **80% → 90% → 95% → 99%**, and each tier fires once. The weekly window is tracked separately (**70% → 85% → 95%**). If usage drops back below a tier, because the window rolled over or the limit was topped up, that tier re-arms and fires again on the way up.
+Warnings come in tiers, **80% → 90% → 95% → 99%**, and each tier fires once. The weekly window is tracked separately (**70% → 85% → 95%**), and its warning names the day and time it resets ("resets Fri 18:28"). If usage drops back below a tier, because the window rolled over or the limit was topped up, that tier re-arms and fires again on the way up.
 
 When the agent lets an adapter look in after every tool call, the check runs in the middle of a turn too, so a long turn of builds or parallel subagents can't cross the threshold unnoticed. The agent then finishes the step it is on, leaves the work in a consistent state, and asks.
 
@@ -97,6 +97,7 @@ The core (`bin/`, `lib/`, `providers/`) never asks which agent is calling. Each 
 | **Gemini CLI** | [adapter](#gemini-cli), `settings.json` | `CONTINUUM_AGENT=gemini` | New: tested in CI, not yet run live |
 | **Cursor** | [adapter](#cursor), `hooks.json` | `CONTINUUM_AGENT=cursor` | New: tested in CI, not yet run live |
 | **opencode** | [adapter](#opencode), JS plugin | `CONTINUUM_AGENT=opencode` | New: tested in CI, not yet run live |
+| **bb** (app) | the adapter of the agent in the thread ([bb](#bb)) | automatic: `bb thread tell` into the same thread | New: tested in CI, not yet run live |
 | Anything else | `continuum check` from a hook, or `continuum watch` in a spare pane | set `CONTINUUM_RESUME_CMD` | Works today |
 
 ```sh
@@ -137,6 +138,8 @@ agent event ──► adapters/<agent>/ ──► continuum check ──► prov
 | Fallback | `nohup sleep` | no | best available |
 
 The log is `continuum-resume.log` in the state directory, with markers `### resumed in DIR` and `### end (exit N)`. A desktop notification (`osascript` / `notify-send`) comes when the run ends.
+
+Inside a [bb](#bb) thread the resumed run is not a separate headless session: the task goes back into the same thread with `bb thread tell`.
 
 ## Providers
 
@@ -269,11 +272,15 @@ The adapter lives in [`adapters/cursor/`](adapters/cursor/README.md): a `stop` h
 
 The adapter is a plugin, [`adapters/opencode/continuum.js`](adapters/opencode/README.md). On `session.idle` it sends the warning to the session as a prompt; after each tool call it appends it to the tool output. Install it with a symlink into `~/.config/opencode/plugins/`, as the adapter's README shows. It runs `continuum check` and nothing else. Resume preset: `opencode run --continue "<task>"`.
 
+## bb
+
+bb is a desktop app that runs agents in threads, so the warning comes from the agent's own adapter: Claude Code threads load the plugins enabled in `~/.claude/settings.json` (install the [Claude Code](#claude-code) plugin), Codex threads read `~/.codex/hooks.json` ([Codex CLI](#codex-cli)). bb sets `BB_THREAD_ID` for the agent; when it is set, `continuum resume` sends the task back into the same thread with `bb thread tell <id> "<task>"` instead of a separate headless run (bb must be running at the reset; `CONTINUUM_RESUME_CMD` still wins). See [`adapters/bb/`](adapters/bb/README.md).
+
 ## Contributing
 
 ```
-sh tests/run.sh          # 160 tests, mock provider, no network (also passes under dash)
-pwsh tests/run.ps1       # 136 tests, the same suite for PowerShell
+sh tests/run.sh          # 165 tests, mock provider, no network (also passes under dash)
+pwsh tests/run.ps1       # 141 tests, the same suite for PowerShell
 ```
 
 Every `.sh` change has a matching `.ps1` change, with tests in both suites. Help is welcome with a provider for another budget (OpenAI, Gemini: see [docs/writing-a-provider.md](docs/writing-a-provider.md)) and an adapter for another agent ([docs/harnesses.md](docs/harnesses.md)).

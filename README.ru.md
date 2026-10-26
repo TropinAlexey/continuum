@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.0-brightgreen.svg" alt="version: 0.7.0"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.1-brightgreen.svg" alt="version: 0.7.0"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -61,7 +61,7 @@ irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | 
 
 Варианты: свернуться, доделать текущий пакет, сохранить и продолжить после сброса, экономный режим (без субагентов), только дешёвые задачи или проигнорировать. Агент спрашивает на твоём языке.
 
-Предупреждения ступенчатые, **80% → 90% → 95% → 99%**, каждая ступень срабатывает один раз. Недельное окно отслеживается отдельно (**70% → 85% → 95%**). Если использование опустилось ниже ступени, потому что окно сменилось или лимит докупили, ступень взводится заново и сработает снова на росте.
+Предупреждения ступенчатые, **80% → 90% → 95% → 99%**, каждая ступень срабатывает один раз. Недельное окно отслеживается отдельно (**70% → 85% → 95%**), и его предупреждение называет день и время сброса («resets Fri 18:28»). Если использование опустилось ниже ступени, потому что окно сменилось или лимит докупили, ступень взводится заново и сработает снова на росте.
 
 Если агент позволяет адаптеру заглядывать после каждого вызова инструмента, проверка идёт и посреди хода, поэтому длинный ход со сборками или параллельными субагентами не пересечёт порог незаметно. Тогда агент доделывает текущий шаг, оставляет работу в целостном состоянии и спрашивает.
 
@@ -97,6 +97,7 @@ continuum resume "$(continuum reset)" "$PWD" "доделать тесты Docume
 | **Gemini CLI** | [адаптер](#gemini-cli), `settings.json` | `CONTINUUM_AGENT=gemini` | Новый: тесты в CI, вживую ещё не запускался |
 | **Cursor** | [адаптер](#cursor), `hooks.json` | `CONTINUUM_AGENT=cursor` | Новый: тесты в CI, вживую ещё не запускался |
 | **opencode** | [адаптер](#opencode), JS-плагин | `CONTINUUM_AGENT=opencode` | Новый: тесты в CI, вживую ещё не запускался |
+| **bb** (приложение) | адаптер агента, запущенного в треде ([bb](#bb)) | автоматически: `bb thread tell` в тот же тред | Новый: тесты в CI, вживую ещё не запускался |
 | Любой другой | `continuum check` из хука или `continuum watch` в отдельной панели | задай `CONTINUUM_RESUME_CMD` | Работает уже сейчас |
 
 ```sh
@@ -137,6 +138,8 @@ CONTINUUM_RESUME_CMD='myagent run "{prompt}"' continuum resume 21:41 "$PWD" "fin
 | Fallback | `nohup sleep` | нет | лучший доступный |
 
 Лог — `continuum-resume.log` в каталоге состояния, с маркерами `### resumed in DIR` и `### end (exit N)`. Когда запуск заканчивается, приходит уведомление на рабочий стол (`osascript` / `notify-send`).
+
+Внутри треда [bb](#bb) возобновление — не отдельная headless-сессия: задача уходит обратно в тот же тред через `bb thread tell`.
 
 ## Провайдеры
 
@@ -269,11 +272,15 @@ continuum statusline reset              # вернуть настройки по
 
 Адаптер — плагин [`adapters/opencode/continuum.js`](adapters/opencode/README.md). На `session.idle` он отправляет предупреждение в сессию как промпт, после каждого вызова инструмента дописывает его к выводу инструмента. Ставится символической ссылкой в `~/.config/opencode/plugins/`, как показано в README адаптера. Он запускает только `continuum check`. Пресет resume: `opencode run --continue "<задача>"`.
 
+## bb
+
+bb — десктоп-приложение, которое запускает агентов в тредах, поэтому предупреждение приходит от адаптера самого агента: треды Claude Code подгружают плагины, включённые в `~/.claude/settings.json` (поставь плагин [Claude Code](#claude-code)), треды Codex читают `~/.codex/hooks.json` ([Codex CLI](#codex-cli)). bb передаёт агенту `BB_THREAD_ID`; если он задан, `continuum resume` отправляет задачу обратно в тот же тред через `bb thread tell <id> "<задача>"`, а не запускает отдельную headless-сессию (bb должен быть запущен в момент сброса; `CONTINUUM_RESUME_CMD` по-прежнему главнее). Подробно — [`adapters/bb/`](adapters/bb/README.md).
+
 ## Участие
 
 ```
-sh tests/run.sh          # 160 тестов, mock-провайдер, без сети (проходит и под dash)
-pwsh tests/run.ps1       # 136 тестов, та же сюита для PowerShell
+sh tests/run.sh          # 165 тестов, mock-провайдер, без сети (проходит и под dash)
+pwsh tests/run.ps1       # 141 тест, та же сюита для PowerShell
 ```
 
 Каждая правка `.sh` дублируется в `.ps1`, с тестами в обе сюиты. Пригодится помощь с провайдером для другого бюджета (OpenAI, Gemini: см. [docs/writing-a-provider.md](docs/writing-a-provider.md)) и с адаптером для другого агента ([docs/harnesses.md](docs/harnesses.md)).
