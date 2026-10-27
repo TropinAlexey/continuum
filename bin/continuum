@@ -14,6 +14,7 @@
 #                               schedule the agent to pick up after the reset
 #   continuum history           show recent usage snapshots
 #   continuum cleanup           remove stale flag/cache files (>24h old)
+#   continuum doctor [--fix]    why the warning does not fire: plugin, old hooks, copies
 #   continuum statusline [key value | reset]
 #                               show or configure status-line format
 #
@@ -190,8 +191,13 @@ cmd_resume() {
             # 1. Pre-emptive caffeinate keeps the machine awake until the job fires.
             wl_pidfile=$(cnt_wakelock_start "$((delay + 300))")
             # 2. The plist wraps the command with caffeinate -i for the execution phase.
+            # Every value in the plist is XML-escaped on top of the shell escaping: a
+            # directory named `x</string></array><key>Program</key>...` must not reshape the
+            # job launchd runs. launchd decodes the entities back before sh sees the code.
+            xml() { printf '%s' "$1" | sed "s/&/\\&amp;/g; s/'/\\&apos;/g; s/\"/\\&quot;/g; s/</\\&lt;/g; s/>/\\&gt;/g"; }
+            x_dir=$(xml "$sq_dir"); x_log=$(xml "$sq_log"); x_LOG=$(xml "$LOG"); x_plist=$(xml "$(sq "$plist")")
             wl_cleanup=""
-            [ -n "$wl_pidfile" ] && wl_cleanup="kill \$(cat '${wl_pidfile}') 2&gt;/dev/null || true; rm -f '${wl_pidfile}';"
+            [ -n "$wl_pidfile" ] && x_wl=$(xml "$(sq "$wl_pidfile")") && wl_cleanup="kill \$(cat '${x_wl}') 2&gt;/dev/null || true; rm -f '${x_wl}';"
             escaped_cmd=$(printf '%s' "$cmd" | sed "s/&/\\&amp;/g; s/'/\\&apos;/g; s/\"/\\&quot;/g; s/</\\&lt;/g; s/>/\\&gt;/g")
             cat > "$plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -203,14 +209,14 @@ cmd_resume() {
     <string>-i</string>
     <string>sh</string>
     <string>-c</string>
-    <string>cd '${sq_dir}' &amp;&amp; printf '\n### %s - resumed in %s\n\n' "\$(date '+%Y-%m-%d %H:%M:%S')" '${sq_dir}' &gt;&gt; '${sq_log}' &amp;&amp; ${escaped_cmd} &gt;&gt; '${sq_log}' 2&gt;&amp;1; s=\$?; printf '\n### end (exit %s) - %s\n' "\$s" '${sq_dir}' &gt;&gt; '${sq_log}'; word=finished; [ "\$s" -eq 0 ] || word="FAILED (exit \$s)"; osascript -e "on run argv" -e "display notification (item 1 of argv) with title (item 2 of argv)" -e "end run" "\$(basename '${sq_dir}')" "continuum resume \$word" 2&gt;/dev/null || true; ${wl_cleanup}launchctl remove '${label}' 2&gt;/dev/null; rm -f '${plist}'</string>
+    <string>cd '${x_dir}' &amp;&amp; printf '\n### %s - resumed in %s\n\n' "\$(date '+%Y-%m-%d %H:%M:%S')" '${x_dir}' &gt;&gt; '${x_log}' &amp;&amp; ${escaped_cmd} &gt;&gt; '${x_log}' 2&gt;&amp;1; s=\$?; printf '\n### end (exit %s) - %s\n' "\$s" '${x_dir}' &gt;&gt; '${x_log}'; word=finished; [ "\$s" -eq 0 ] || word="FAILED (exit \$s)"; osascript -e "on run argv" -e "display notification (item 1 of argv) with title (item 2 of argv)" -e "end run" "\$(basename '${x_dir}')" "continuum resume \$word" 2&gt;/dev/null || true; ${wl_cleanup}launchctl remove '${label}' 2&gt;/dev/null; rm -f '${x_plist}'</string>
   </array>
   <key>StartCalendarInterval</key><dict>
     <key>Hour</key><integer>$(date -r "$fire_epoch" +%H | sed 's/^0//')</integer>
     <key>Minute</key><integer>$(date -r "$fire_epoch" +%M | sed 's/^0//')</integer>
   </dict>
-  <key>StandardOutPath</key><string>${LOG}</string>
-  <key>StandardErrorPath</key><string>${LOG}</string>
+  <key>StandardOutPath</key><string>${x_LOG}</string>
+  <key>StandardErrorPath</key><string>${x_LOG}</string>
 </dict></plist>
 PLIST
             if launchctl load "$plist" 2>/dev/null; then
@@ -614,6 +620,86 @@ _sl_set() {
     fi
 }
 
+# Why does the warning not fire? One line per check - ok / warn / fail / skip - and exit 1
+# on any fail. Read-only; `--fix` applies only the safe fixes (statusline copy, root
+# pointer) and prints the manual step for the rest. Never edits settings.json hooks.
+cmd_doctor() {
+    fix=""; [ "${1:-}" = "--fix" ] && fix=1
+    fails=0
+    say() { printf '%-4s %s\n' "$1" "$2"; [ "$1" = fail ] && fails=$((fails + 1)); return 0; }
+    ver() { grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$1" 2>/dev/null | head -1 | sed 's/.*"\([^"]*\)"$/\1/'; }
+    mine=$(ver "$CNT_ROOT/.claude-plugin/plugin.json")
+
+    if lines=$(cnt_read 2>/dev/null) && [ -n "$lines" ]; then
+        say ok "provider $CNT_PROVIDER: $(printf '%s\n' "$lines" | awk 'NR==1 {print $1, $2 "%"}')"
+    else
+        say fail "provider $CNT_PROVIDER gives no numbers (offline, rate limited, or no token): continuum status"
+    fi
+
+    if mkdir -p "$CNT_STATE" 2>/dev/null && : > "$CNT_STATE/.continuum-doctor" 2>/dev/null; then
+        rm -f "$CNT_STATE/.continuum-doctor"; say ok "state dir $CNT_STATE"
+    else
+        say fail "state dir $CNT_STATE is not writable"
+    fi
+
+    ptr=$(cat "$CNT_STATE/root" 2>/dev/null || true)
+    if [ -n "$ptr" ] && [ -f "$ptr/bin/continuum" ]; then
+        say ok "root pointer $ptr"
+    elif [ -n "$fix" ]; then
+        cnt_set_root_pointer 2>/dev/null && say ok "root pointer rewritten: $CNT_ROOT" || say fail "root pointer: cannot write $CNT_STATE/root"
+    else
+        say warn "root pointer ${ptr:-missing} (a statusline copy cannot find the code): continuum doctor --fix"
+    fi
+
+    cdir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; settings="$cdir/settings.json"
+    if [ ! -f "$settings" ]; then
+        say skip "Claude Code: no $settings"
+    else
+        if grep -q '"continuum@[^"]*"[[:space:]]*:[[:space:]]*true' "$settings"; then
+            say ok "Claude Code plugin enabled"
+        else
+            say fail "Claude Code plugin not enabled in $settings: /plugin install continuum@continuum"
+        fi
+        legacy=$(grep -oE 'token-budget-check\.sh|\.claude/lib/usage\.sh|/hooks/continuum-check\.(sh|ps1)' "$settings" | sort -u | tr '\n' ' ')
+        if [ -n "$legacy" ]; then
+            say warn "old hooks still wired in $settings: ${legacy% } - remove them from \"hooks\" (the plugin brings its own)"
+        else
+            say ok "no old hooks in settings.json"
+        fi
+        copy="$cdir/hooks/statusline.sh"; src="$CNT_ROOT/adapters/claude/statusline.sh"
+        if [ ! -f "$copy" ] || ! grep -q continuum "$copy" 2>/dev/null; then
+            say skip "statusline copy: none"
+        elif cmp -s "$src" "$copy"; then
+            say ok "statusline copy current"
+        elif [ -n "$fix" ]; then
+            cp "$src" "$copy" 2>/dev/null && say ok "statusline copy refreshed: $copy" || say fail "statusline copy: cannot write $copy"
+        else
+            say warn "statusline copy $copy differs from this version: continuum doctor --fix"
+        fi
+        cached=$(ls "$cdir/plugins/cache/continuum/continuum" 2>/dev/null | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+        if [ -n "$cached" ] && [ -n "$mine" ] && [ "$cached" != "$mine" ]; then
+            say warn "Claude Code runs plugin $cached, this code is $mine: /plugin update continuum, then restart the session"
+        elif [ -n "$cached" ]; then
+            say ok "Claude Code plugin version $cached"
+        fi
+    fi
+
+    jhome="${JUNIE_HOME:-$HOME/.junie}"
+    jext=$(ls -d "$jhome"/extensions/*/continuum 2>/dev/null | head -1)
+    if [ -z "$jext" ]; then
+        say skip "Junie: continuum extension not installed"
+    else
+        jv=$(ver "$jext/.claude-plugin/plugin.json")
+        if [ -n "$mine" ] && [ "$jv" != "$mine" ]; then
+            say warn "Junie extension is ${jv:-unknown}, this code is $mine: in Junie, /extensions -> update continuum"
+        else
+            say ok "Junie extension ${jv:-?}"
+        fi
+    fi
+
+    [ "$fails" -eq 0 ]
+}
+
 cmd_cleanup() {
     cleaned=0
     for f in "$CNT_STATE"/.continuum-warned-* "$CNT_STATE"/.continuum-warned7d-* "$CNT_STATE"/.continuum-cache-* "$CNT_STATE"/.continuum-wakelock-* "$CNT_STATE"/.continuum-limit-*; do
@@ -638,6 +724,7 @@ case "${1:-}" in
     estimate)   cmd_estimate ;;
     history)    cmd_history ;;
     cleanup)    cmd_cleanup ;;
+    doctor)     shift; cmd_doctor "$@" || exit 1 ;;
     statusline) shift; cmd_statusline "$@" ;;
     -h|--help)  usage ;;
     *)          echo "continuum: unknown command '$1'" >&2; usage >&2; exit 1 ;;

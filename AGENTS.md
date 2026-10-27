@@ -45,8 +45,8 @@
 ## Команды
 
 ```sh
-sh tests/run.sh          # 197 тестов, mock, без сети (эталон; проходит и под dash)
-pwsh tests/run.ps1       # 160 тестов, та же сюита для PowerShell
+sh tests/run.sh          # 213 тестов, mock, без сети (эталон; проходит и под dash)
+pwsh tests/run.ps1       # 171 тест, та же сюита для PowerShell
 continuum status         # 5h 86.5% resets at 21:40 + weekly строка
 continuum reset          # HH:MM ресета (+90s, для планировщика)
 continuum estimate       # сколько осталось at this pace
@@ -57,6 +57,8 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
 ```
 
 ## Текущее состояние (2026-10-27)
+
+- **v0.7.4 — R3 `continuum doctor [--fix]`** (спека `…/2026-10-26-r3-doctor.md`): ok/warn/fail/skip по строке, exit 1 только на fail. Провайдер, каталог состояния, указатель на код, плагин в `enabledPlugins`, старые хуки (`token-budget-check.sh`, `.claude/lib/usage.sh`, `hooks/continuum-check.*`), копия statusline, **версия плагина, которую реально запускает Claude Code** (`~/.claude/plugins/cache/continuum/continuum/<ver>`), версия расширения Junie. `--fix` — только копия statusline и указатель; `settings.json` не трогает. На этой машине сразу показал: плагин и Junie на 0.7.0. Секьюрити-автофикс (находка автоматического ревью): значения в plist launchd не XML-экранировались — каталог `x</string></array><key>Program</key>…` перестраивал задание; теперь экранирование поверх shell-квотинга + тест на macOS (`plutil`). В `.ps1` экранирован путь pid-файла вейклока. **Тесты: sh 213/213 (и под dash), ps 171/171.**
 
 - **v0.7.3 — R4: лимит кончился посреди хода** (спека `docs/superpowers/specs/2026-10-26-r4-stopfailure-rate-limit.md`, первая по пайплайну). Хук `StopFailure` (matcher `rate_limit`, Claude Code и Junie) → `adapters/claude/stop-failure.sh|ps1` → ядро `continuum limit-hit [session] [agent] [dir]`: уведомление, строка `### limit hit` в логе resume, заметка `.continuum-limit-notes` → `resume-report.sh` покажет при следующем старте один раз. Окно — то, что исчерпано (по кэшу, без сети). С `CONTINUUM_RESUME_ON_LIMIT=1` (согласие заранее) ещё и `continuum resume` на сброс по пресету агента, только если сброс в ближайшие 24 ч, один на каталог за окно. `CONTINUUM_NOTIFY_CMD` подменяет уведомлялку. Секьюрити-автофиксы: текст уведомлений шёл в исходник AppleScript (`osascript -e "display notification \"$msg\""`) → теперь argv (3 места); управляющие символы из имени каталога вычищаются (нельзя подделать строки заметок/контекста). `continuum cleanup` чистит `.continuum-limit-*`. **Тесты: sh 197/197 (и под dash), ps 160/160.**
 

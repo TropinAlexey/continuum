@@ -22,7 +22,9 @@ param(
     # `check --session X --agent Y`: under `pwsh -File` the double-dash names bind
     # here; called in-process they arrive positionally. Both paths are handled.
     [string]$Session,
-    [string]$Agent
+    [string]$Agent,
+    # `doctor --fix` binds here under `pwsh -File`, positionally in-process.
+    [switch]$Fix
 )
 
 # param() must be the first statement in the file - everything else comes after.
@@ -150,7 +152,7 @@ function Invoke-Resume {
     # Wakelock: prevent system sleep during wait + execution.
     $wlFile = Start-CntWakeLock ($delay + 7200)
     $wlCleanup = ''
-    if ($wlFile) { $wlCleanup = "; Stop-CntWakeLock '$wlFile'" }
+    if ($wlFile) { $wlCleanup = "; Stop-CntWakeLock '$($wlFile.Replace("'", "''"))'" }
 
     # Detached: survives closing the terminal, does NOT survive a reboot.
     # The wakelock is released after the task finishes (or on cancel).
@@ -494,6 +496,92 @@ function Invoke-CntHistory {
     Get-Content $hist | Select-Object -Last 20
 }
 
+# Why does the warning not fire? Mirrors `continuum doctor`: one line per check - ok /
+# warn / fail / skip - and exit 1 on any fail. Read-only; -Fix (`doctor --fix`) applies
+# only the safe fixes (statusline copy, root pointer). Never edits settings.json hooks.
+function Invoke-CntDoctor {
+    param([string]$Opt)
+    $fix = ($Opt -eq '--fix')
+    $script:docFails = 0
+    function Say ($level, $text) { '{0,-4} {1}' -f $level, $text; if ($level -eq 'fail') { $script:docFails++ } }
+    function Get-Ver ($f) {
+        if ((Test-Path $f) -and ([System.IO.File]::ReadAllText($f) -match '"version"\s*:\s*"([^"]*)"')) { return $Matches[1] }
+        return ''
+    }
+    $mine = Get-Ver (Join-Path $script:CntRoot '.claude-plugin/plugin.json')
+
+    $lines = $null
+    try { $lines = @(Read-CntUsage 2>$null 3>$null 6>$null) } catch { $lines = $null }
+    if ($lines) {
+        $p = $lines[0].Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+        Say 'ok' "provider $($script:CntProvider): $($p[0]) $($p[1])%"
+    } else {
+        Say 'fail' "provider $($script:CntProvider) gives no numbers (offline, rate limited, or no token): continuum status"
+    }
+
+    try {
+        New-Item -ItemType Directory -Force -Path $script:CntState | Out-Null
+        $probe = Join-Path $script:CntState '.continuum-doctor'
+        [System.IO.File]::WriteAllText($probe, ''); Remove-Item -Force $probe
+        Say 'ok' "state dir $($script:CntState)"
+    } catch { Say 'fail' "state dir $($script:CntState) is not writable" }
+
+    $ptrFile = Join-Path $script:CntState 'root'
+    $ptr = ''
+    if (Test-Path $ptrFile) { $ptr = [System.IO.File]::ReadAllText($ptrFile).Trim() }
+    if ($ptr -and (Test-Path (Join-Path $ptr 'bin/continuum.ps1'))) {
+        Say 'ok' "root pointer $ptr"
+    } elseif ($fix) {
+        try { Set-CntRootPointer; Say 'ok' "root pointer rewritten: $($script:CntRoot)" } catch { Say 'fail' "root pointer: cannot write $ptrFile" }
+    } else {
+        Say 'warn' "root pointer $(if ($ptr) { $ptr } else { 'missing' }) (a statusline copy cannot find the code): continuum doctor --fix"
+    }
+
+    $cdir = $(if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' })
+    $settings = Join-Path $cdir 'settings.json'
+    if (-not (Test-Path $settings)) {
+        Say 'skip' "Claude Code: no $settings"
+    } else {
+        $sj = [System.IO.File]::ReadAllText($settings)
+        if ($sj -match '"continuum@[^"]*"\s*:\s*true') { Say 'ok' 'Claude Code plugin enabled' }
+        else { Say 'fail' "Claude Code plugin not enabled in ${settings}: /plugin install continuum@continuum" }
+        $legacy = @([regex]::Matches($sj, 'token-budget-check\.sh|\.claude/lib/usage\.sh|/hooks/continuum-check\.(sh|ps1)') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+        if ($legacy.Count) { Say 'warn' "old hooks still wired in ${settings}: $($legacy -join ' ') - remove them from `"hooks`" (the plugin brings its own)" }
+        else { Say 'ok' 'no old hooks in settings.json' }
+        $copy = Join-Path $cdir 'hooks/statusline.ps1'
+        $src = Join-Path $script:CntRoot 'adapters/claude/statusline.ps1'
+        if (-not (Test-Path $copy) -or -not ([System.IO.File]::ReadAllText($copy) -match 'continuum')) {
+            Say 'skip' 'statusline copy: none'
+        } elseif ([System.IO.File]::ReadAllText($copy) -eq [System.IO.File]::ReadAllText($src)) {
+            Say 'ok' 'statusline copy current'
+        } elseif ($fix) {
+            try { Copy-Item -Force $src $copy; Say 'ok' "statusline copy refreshed: $copy" } catch { Say 'fail' "statusline copy: cannot write $copy" }
+        } else {
+            Say 'warn' "statusline copy $copy differs from this version: continuum doctor --fix"
+        }
+        $cacheDir = Join-Path $cdir 'plugins/cache/continuum/continuum'
+        $cached = ''
+        if (Test-Path $cacheDir) {
+            $cached = @(Get-ChildItem -Directory $cacheDir | ForEach-Object { $_.Name } | Where-Object { $_ -match '^\d+(\.\d+)*$' } |
+                Sort-Object { [version]$_ }) | Select-Object -Last 1
+        }
+        if ($cached -and $mine -and $cached -ne $mine) { Say 'warn' "Claude Code runs plugin $cached, this code is ${mine}: /plugin update continuum, then restart the session" }
+        elseif ($cached) { Say 'ok' "Claude Code plugin version $cached" }
+    }
+
+    $jhome = $(if ($env:JUNIE_HOME) { $env:JUNIE_HOME } else { Join-Path $HOME '.junie' })
+    $jext = @(Get-ChildItem -Directory -Path (Join-Path $jhome 'extensions') -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'continuum' } | Where-Object { Test-Path $_ }) | Select-Object -First 1
+    if (-not $jext) {
+        Say 'skip' 'Junie: continuum extension not installed'
+    } else {
+        $jv = Get-Ver (Join-Path $jext '.claude-plugin/plugin.json')
+        if ($mine -and $jv -ne $mine) { Say 'warn' "Junie extension is $(if ($jv) { $jv } else { 'unknown' }), this code is ${mine}: in Junie, /extensions -> update continuum" }
+        else { Say 'ok' "Junie extension $jv" }
+    }
+    if ($script:docFails -gt 0) { exit 1 }
+}
+
 function Invoke-Cleanup {
     $cleaned = 0
     $cutoff = (Get-Date).AddHours(-24)
@@ -582,6 +670,7 @@ switch ($Command) {
     'resume'    { Invoke-Resume $Arg1 $Arg2 $Arg3 }
     'history'   { Invoke-CntHistory }
     'cleanup'   { Invoke-Cleanup }
+    'doctor'    { Invoke-CntDoctor $(if ($Fix) { '--fix' } else { $Arg1 }) }
     'statusline' { Invoke-StatuslineConfig $Arg1 $Arg2 }
     default     { [Console]::Error.WriteLine("continuum: unknown command '$Command'"); exit 1 }
 }

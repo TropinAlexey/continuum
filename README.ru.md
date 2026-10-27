@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.3-brightgreen.svg" alt="version: 0.7.0"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.4-brightgreen.svg" alt="version: 0.7.0"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -50,7 +50,7 @@ irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | 
 
 - **Сеть.** В сеть ходит только провайдер. Провайдер по умолчанию, `anthropic`, делает один `GET https://api.anthropic.com/api/oauth/usage` с OAuth-токеном в заголовке `Authorization`. Это **недокументированный эндпоинт**, не публичный API, и он может измениться. Ответ кэшируется на 10 минут. Необязательный провайдер `spend` обращается к `https://api.anthropic.com/v1/billing/usage` с `ANTHROPIC_ADMIN_KEY`. Больше ничего с машины не уходит.
 - **Учётные данные.** Провайдер `anthropic` ищет токен в таком порядке: `$CLAUDE_CODE_OAUTH_TOKEN`, запись `Claude Code-credentials` в Keychain macOS, затем `~/.claude/.credentials.json`. Он уходит только на `api.anthropic.com` и нигде не сохраняется.
-- **Файлы.** Кэш, флаги, логи и конфиг лежат в `~/.local/state/continuum` (см. [Настройка](#настройка)). CLI-инсталлятор кладёт код в `~/.continuum`, а символическую ссылку на него — в каталог из `PATH`.
+- **Файлы.** Кэш, флаги, логи и конфиг лежат в `~/.local/state/continuum` (см. [Настройка](#настройка)). CLI-инсталлятор кладёт код в `~/.continuum`, а символическую ссылку на него — в каталог из `PATH`. `continuum doctor` читает `~/.claude/settings.json`, кэш плагина и `~/.junie/extensions` только для отчёта; пишет лишь `doctor --fix`, и только копию статус-бара в `~/.claude/hooks/` и указатель на код в каталоге состояния.
 - **Уведомления.** Уведомление на рабочий стол (`osascript` / `notify-send` или твой `CONTINUUM_NOTIFY_CMD`), когда запуск resume закончился и когда лимит кончился посреди хода. Текст уходит в `osascript` аргументами, а не как скрипт.
 - **Запуск без присмотра.** `continuum resume` запускает агента, когда никто не смотрит, по пресету агента или по `CONTINUUM_RESUME_CMD`; внутри треда bb вместо этого отправляет задачу в тот же тред через `bb thread tell`. Запуск происходит только по твоему выбору: вариант «сохранить и продолжить», ручной вызов команды или заранее заданный `CONTINUUM_RESUME_ON_LIMIT=1`, который планирует resume, когда лимит кончился посреди хода. Ставь узкую задачу и не направляй его на то, что не дал бы мержить незнакомцу.
 
@@ -78,6 +78,7 @@ continuum estimate    # при таком темпе ещё ~2ч 15м
 continuum watch       # опрос в отдельной панели; звонок на пороге
 continuum history     # последние 20 снимков, сделанных `continuum status`
 continuum cleanup     # удалить устаревшие файлы флагов и кэша (>24ч)
+continuum doctor      # почему нет предупреждения: провайдер, плагин, старые хуки, устаревшие копии (--fix: безопасные правки)
 continuum providers   # anthropic, mock, spend
 continuum check       # печатает предупреждение при пересечении новой ступени, иначе ничего
 continuum statusline  # показать конфиг статус-бара
@@ -180,7 +181,7 @@ macOS, Linux, FreeBSD/OpenBSD/NetBSD, Windows (Git Bash или PowerShell). POSI
 
 ## Если что-то не так
 
-**Нет предупреждения на 80%.** Запусти `sh tests/run.sh`. Если он проходит, с кодом всё в порядке, и дело в том, как подключён адаптер агента; см. его раздел ниже.
+**Нет предупреждения на 80%.** Сначала `continuum doctor`: он проверит провайдер, включён ли плагин, не подключены ли старые хуки, не устарели ли копии плагина, статус-бара и расширения Junie — и подскажет исправление. Потом `sh tests/run.sh`. Если он проходит, с кодом всё в порядке, и дело в том, как подключён адаптер агента; см. его раздел ниже.
 
 **`usage endpoint unavailable`.** Нет сети, сработал рейт-лимит (сбои тоже кэшируются, подожди 10 минут) или истёк токен. Перелогинься в агенте, которому принадлежит токен.
 
@@ -292,8 +293,8 @@ bb — десктоп-приложение, которое запускает а
 ## Участие
 
 ```
-sh tests/run.sh          # 197 тестов, mock-провайдер, без сети (проходит и под dash)
-pwsh tests/run.ps1       # 160 тестов, та же сюита для PowerShell
+sh tests/run.sh          # 213 тестов, mock-провайдер, без сети (проходит и под dash)
+pwsh tests/run.ps1       # 171 тест, та же сюита для PowerShell
 ```
 
 Каждая правка `.sh` дублируется в `.ps1`, с тестами в обе сюиты. Пригодится помощь с провайдером для другого бюджета (OpenAI, Gemini: см. [docs/writing-a-provider.md](docs/writing-a-provider.md)) и с адаптером для другого агента ([docs/harnesses.md](docs/harnesses.md)).

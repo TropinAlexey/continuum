@@ -413,6 +413,37 @@ Check "claude stays claude with a nested project_path" 'use AskUserQuestion' (To
 $out = Hook 'js' '{"hook_event_name":"Stop","session_id":"js","project_path":"/p","stop_hook_active":false}'
 Check "junie stop names the resume preset" 'CONTINUUM_AGENT=junie continuum resume' $out
 
+Write-Host "doctor:"
+$dr = Join-Path $tmp 'dr'
+foreach ($d in @('claude/hooks', 'claude/plugins/cache/continuum/continuum/0.1.0', 'junie/extensions/m/continuum/.claude-plugin', 'st')) { New-Item -ItemType Directory -Force -Path (Join-Path $dr $d) | Out-Null }
+Set-Content -Path (Join-Path $dr 'claude/settings.json') -Value '{ "enabledPlugins": { "continuum@continuum": true } }'
+Set-Content -Path (Join-Path $dr 'junie/extensions/m/continuum/.claude-plugin/plugin.json') -Value '{ "version": "0.0.1" }'
+Set-Content -Path (Join-Path $dr 'claude/hooks/statusline.ps1') -Value '# continuum old'
+function Doc ($opt) {
+    $env:CLAUDE_CONFIG_DIR = Join-Path $dr 'claude'; $env:JUNIE_HOME = Join-Path $dr 'junie'; $env:CONTINUUM_STATE_DIR = Join-Path $dr 'st'
+    $o = & pwsh -NoProfile -File (Join-Path $root 'bin/continuum.ps1') doctor $opt 2>&1
+    $script:docRc = $LASTEXITCODE
+    Remove-Item Env:CLAUDE_CONFIG_DIR, Env:JUNIE_HOME -ErrorAction SilentlyContinue
+    return ($o -join "`n")
+}
+$out = Doc ''
+Check "doctor: provider ok" 'ok   provider mock: 5h 86.5%' $out
+Check "doctor: plugin enabled" 'ok   Claude Code plugin enabled' $out
+Check "doctor: stale statusline copy" 'warn statusline copy' $out
+Check "doctor: old plugin version" 'warn Claude Code runs plugin 0.1.0' $out
+Check "doctor: old Junie extension" 'warn Junie extension is 0.0.1' $out
+if ($script:docRc -eq 0) { Ok "doctor: warnings alone exit 0" } else { Bad "doctor: warnings alone exit 0" "rc=$script:docRc" }
+$out = Doc '--fix'
+Check "doctor --fix refreshes the copy" 'ok   statusline copy refreshed' $out
+Set-Content -Path (Join-Path $dr 'claude/settings.json') -Value '{ "hooks": { "Stop": [{ "hooks": [{ "command": "sh ~/.claude/hooks/token-budget-check.sh" }] }] } }'
+$before = Get-Content -Raw (Join-Path $dr 'claude/settings.json')
+$out = Doc '--fix'
+Check "doctor: plugin not enabled fails" 'fail Claude Code plugin not enabled' $out
+Check "doctor: old hooks found" 'warn old hooks still wired' $out
+if ($script:docRc -eq 1) { Ok "doctor: a fail exits 1" } else { Bad "doctor: a fail exits 1" "rc=$script:docRc" }
+if ((Get-Content -Raw (Join-Path $dr 'claude/settings.json')) -eq $before) { Ok "doctor --fix never edits settings.json" } else { Bad "doctor --fix never edits settings.json" "changed" }
+$env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
+
 Write-Host "limit hit mid-turn (StopFailure):"
 # rate_limit -> log line, notification, note for the next start; never a resume
 # unless CONTINUUM_RESUME_ON_LIMIT=1. The notifier is swapped for a recorder.

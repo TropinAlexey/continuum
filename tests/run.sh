@@ -352,6 +352,34 @@ grep -q statusLine "$jcd/settings.json" && bad "junie leaves Claude settings alo
 printf '{"hook_event_name":"SessionStart"}' | CLAUDE_CONFIG_DIR="$jcd" CONTINUUM_STATE_DIR="$TMP/jss" sh "$ROOT/adapters/claude/setup-statusline.sh" >/dev/null 2>&1
 grep -q statusLine "$jcd/settings.json" && ok "claude SessionStart still sets the status line" || bad "claude SessionStart still sets the status line" "not added"
 
+echo "doctor:"
+dr="$TMP/dr"; mkdir -p "$dr/claude/hooks" "$dr/claude/plugins/cache/continuum/continuum/0.1.0" "$dr/junie/extensions/m/continuum/.claude-plugin" "$dr/st"
+printf '{\n  "enabledPlugins": { "continuum@continuum": true }\n}\n' > "$dr/claude/settings.json"
+printf '{ "version": "0.0.1" }\n' > "$dr/junie/extensions/m/continuum/.claude-plugin/plugin.json"
+printf '#!/bin/sh\n# continuum old\n' > "$dr/claude/hooks/statusline.sh"
+doc() { CLAUDE_CONFIG_DIR="$dr/claude" JUNIE_HOME="$dr/junie" CONTINUUM_STATE_DIR="$dr/st" sh "$ROOT/bin/continuum" doctor "$@" 2>&1; }
+out=$(doc) && rc=0 || rc=$?
+check "doctor: provider ok"           "ok   provider mock: 5h 86.5%" "$out"
+check "doctor: plugin enabled"        "ok   Claude Code plugin enabled" "$out"
+check "doctor: no old hooks"          "ok   no old hooks in settings.json" "$out"
+check "doctor: stale statusline copy" "warn statusline copy" "$out"
+check "doctor: old plugin version"    "warn Claude Code runs plugin 0.1.0" "$out"
+check "doctor: old Junie extension"   "warn Junie extension is 0.0.1" "$out"
+check "doctor: root pointer"          "ok   root pointer $ROOT" "$out"
+[ "$rc" = 0 ] && ok "doctor: warnings alone exit 0" || bad "doctor: warnings alone exit 0" "rc=$rc"
+out=$(doc --fix)
+check "doctor --fix refreshes the copy"  "ok   statusline copy refreshed" "$out"
+cmp -s "$ROOT/adapters/claude/statusline.sh" "$dr/claude/hooks/statusline.sh" && ok "doctor --fix copy is current" || bad "doctor --fix copy is current" "differs"
+printf '{ "hooks": { "Stop": [{ "hooks": [{ "command": "sh ~/.claude/hooks/token-budget-check.sh" }] }] } }\n' > "$dr/claude/settings.json"
+out=$(doc) && rc=0 || rc=$?
+check "doctor: plugin not enabled fails" "fail Claude Code plugin not enabled" "$out"
+check "doctor: old hooks found"          "warn old hooks still wired" "$out"
+[ "$rc" = 1 ] && ok "doctor: a fail exits 1" || bad "doctor: a fail exits 1" "rc=$rc"
+cp "$dr/claude/settings.json" "$dr/settings.before"; doc --fix >/dev/null || true
+cmp -s "$dr/claude/settings.json" "$dr/settings.before" && ok "doctor --fix never edits settings.json" || bad "doctor --fix never edits settings.json" "changed"
+rm -rf "$dr/junie/extensions"
+check "doctor: no Junie extension is a skip" "skip Junie" "$(doc)"
+
 echo "limit hit mid-turn (StopFailure):"
 # rate_limit -> log line, notification, note for the next start; never a resume
 # unless CONTINUUM_RESUME_ON_LIMIT=1. The notifier is swapped for a recorder.
@@ -392,6 +420,20 @@ nl_dir="$TMP/lh_bad
 1793000000	forged"; st7="$TMP/lh7"; mkdir -p "$nl_dir" "$st7"; cp "$TMP/lh1/.continuum-cache-mock" "$st7/"
 (CONTINUUM_STATE_DIR="$st7" CONTINUUM_NOTIFY_CMD="$lh_rec" LH_OUT="$st7/notified" sh "$ROOT/bin/continuum" limit-hit c9 claude "$nl_dir" >/dev/null 2>&1) || true
 [ "$(wc -l < "$st7/.continuum-limit-notes" | tr -d ' ')" = 1 ] && ok "control chars cannot forge note lines" || bad "control chars cannot forge note lines" "$(cat "$st7/.continuum-limit-notes")"
+# The launchd plist must not take its shape from the directory name (macOS only).
+if [ "$(uname)" = Darwin ] && command -v plutil >/dev/null 2>&1; then
+    px="$TMP/px"; mkdir -p "$px/stub" "$px/home"
+    printf '#!/bin/sh\n[ "$1" = load ] && cp "$2" "%s/plist.copy"\nexit 0\n' "$px" > "$px/stub/launchctl"
+    printf '#!/bin/sh\nexit 0\n' > "$px/stub/caffeinate"; chmod +x "$px/stub/launchctl" "$px/stub/caffeinate"
+    pbad="$px/x&y</string></array><key>Program</key><string>/bin/evil"; mkdir -p "$pbad"
+    (HOME="$px/home" PATH="$px/stub:$PATH" CONTINUUM_STATE_DIR="$px/st" CONTINUUM_RESUME_CMD='true {prompt}' sh "$ROOT/bin/continuum" resume 23:59 "$pbad" t >/dev/null 2>&1) || true
+    if plutil -lint "$px/plist.copy" >/dev/null 2>&1 && ! plutil -extract Program raw -o - "$px/plist.copy" >/dev/null 2>&1 \
+        && [ "$(plutil -extract ProgramArguments raw -o - "$px/plist.copy" 2>/dev/null)" = 5 ]; then
+        ok "launchd plist is XML-escaped"
+    else
+        bad "launchd plist is XML-escaped" "$(cat "$px/plist.copy" 2>/dev/null | head -c 300)"
+    fi
+fi
 grep -q '"matcher": "rate_limit"' "$ROOT/hooks/hooks.json" && grep -q 'stop-failure.sh' "$ROOT/hooks/hooks.json" && ok "hooks.json wires StopFailure rate_limit" || bad "hooks.json wires StopFailure rate_limit" "missing"
 
 echo "other agents:"

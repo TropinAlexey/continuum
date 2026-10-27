@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.3-brightgreen.svg" alt="version: 0.7.0"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.4-brightgreen.svg" alt="version: 0.7.0"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -50,7 +50,7 @@ What the core reads, sends, writes and runs. Each adapter adds its own list, in 
 
 - **Network.** Only the provider talks to the network. The default `anthropic` provider makes one `GET https://api.anthropic.com/api/oauth/usage` with an OAuth token in the `Authorization` header. This is an **undocumented endpoint**, not a public API, and it may change. The result is cached for 10 minutes. The optional `spend` provider calls `https://api.anthropic.com/v1/billing/usage` with `ANTHROPIC_ADMIN_KEY`. Nothing else leaves the machine.
 - **Credentials.** The `anthropic` provider looks for the token in this order: `$CLAUDE_CODE_OAUTH_TOKEN`, the macOS Keychain entry `Claude Code-credentials`, then `~/.claude/.credentials.json`. It goes only to `api.anthropic.com` and is never written anywhere.
-- **Files.** Cache, flags, logs and config go to `~/.local/state/continuum` (see [Configuration](#configuration)). The CLI installer puts the code in `~/.continuum` and a symlink to it on your `PATH`.
+- **Files.** Cache, flags, logs and config go to `~/.local/state/continuum` (see [Configuration](#configuration)). The CLI installer puts the code in `~/.continuum` and a symlink to it on your `PATH`. `continuum doctor` reads `~/.claude/settings.json`, the plugin cache and `~/.junie/extensions` to report; only `doctor --fix` writes, and only the status line copy in `~/.claude/hooks/` and the root pointer in the state directory.
 - **Notifications.** A desktop notification (`osascript` / `notify-send`, or your `CONTINUUM_NOTIFY_CMD`) when a resume run ends and when the limit runs out mid-turn. The text goes to `osascript` as arguments, never as script.
 - **Unattended runs.** `continuum resume` starts your agent with nobody watching, using the agent's preset or `CONTINUUM_RESUME_CMD`; inside a bb thread it sends the task to that thread with `bb thread tell` instead. It runs only when you ask for it: by choosing "save and resume", by running the command, or by setting `CONTINUUM_RESUME_ON_LIMIT=1` in advance, which schedules a resume when the limit runs out in the middle of a turn. Keep the task narrow, and don't point it at anything you wouldn't let a stranger merge.
 
@@ -78,6 +78,7 @@ continuum estimate    # at this pace, ~2h 15m left
 continuum watch       # poll in a spare pane; bell at threshold
 continuum history     # last 20 snapshots taken by `continuum status`
 continuum cleanup     # remove stale flag/cache files (>24h old)
+continuum doctor      # why no warning: provider, plugin enabled, old hooks, stale copies (--fix: safe fixes)
 continuum providers   # anthropic, mock, spend
 continuum check       # prints a warning when a new tier is crossed, else nothing
 continuum statusline  # show status-line format config
@@ -180,7 +181,7 @@ macOS, Linux, FreeBSD/OpenBSD/NetBSD, Windows (Git Bash or PowerShell). POSIX `s
 
 ## Troubleshooting
 
-**No warning at 80%.** Run `sh tests/run.sh`. If it passes, the code is fine and the problem is in how your agent's adapter is wired; see its section below.
+**No warning at 80%.** Run `continuum doctor` first: it checks the provider, that the plugin is enabled, old hooks still wired, and stale copies of the plugin, the status line and the Junie extension, with the fix for each. Then `sh tests/run.sh`. If it passes, the code is fine and the problem is in how your agent's adapter is wired; see its section below.
 
 **`usage endpoint unavailable`.** You are offline, rate-limited (failures are cached too, so wait 10 minutes), or the token has expired. Log in again to the agent the token belongs to.
 
@@ -292,8 +293,8 @@ bb is a desktop app that runs agents in threads, so the warning comes from the a
 ## Contributing
 
 ```
-sh tests/run.sh          # 197 tests, mock provider, no network (also passes under dash)
-pwsh tests/run.ps1       # 160 tests, the same suite for PowerShell
+sh tests/run.sh          # 213 tests, mock provider, no network (also passes under dash)
+pwsh tests/run.ps1       # 171 tests, the same suite for PowerShell
 ```
 
 Every `.sh` change has a matching `.ps1` change, with tests in both suites. Help is welcome with a provider for another budget (OpenAI, Gemini: see [docs/writing-a-provider.md](docs/writing-a-provider.md)) and an adapter for another agent ([docs/harnesses.md](docs/harnesses.md)).
