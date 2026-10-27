@@ -447,12 +447,21 @@ check "dry run prints the change" "would write $ih/.codex/hooks.json" "$out"
 ci install --agent codex >/dev/null; printf ' ' >> "$ih/.codex/hooks.json"
 out=$(ci uninstall --agent codex) || true
 check "uninstall refuses a file changed since install" "changed since install" "$out"
-check "install opencode links the plugin" "linked $ih/.config/opencode/plugins/continuum.js" "$(ci install --agent opencode)"
-check "uninstall opencode removes only its link" "removed" "$(ci uninstall --agent opencode)"
-printf '{}' > "$ih/real.json"; rm -f "$ih/.cursor/hooks.json"; ln -s "$ih/real.json" "$ih/.cursor/hooks.json"
-out=$(ci install --agent cursor) || true
-check "install refuses a symlinked config" "is a symlink" "$out"
-[ -L "$ih/.cursor/hooks.json" ] && ok "the symlink stays a symlink" || bad "the symlink stays a symlink" "replaced"
+# Git Bash without winsymlinks copies on `ln -s`: there install must refuse, not copy.
+ln -s "$ih/gemini.orig" "$ih/lncheck" 2>/dev/null || true
+if [ -L "$ih/lncheck" ]; then
+    check "install opencode links the plugin" "linked $ih/.config/opencode/plugins/continuum.js" "$(ci install --agent opencode)"
+    check "uninstall opencode removes only its link" "removed" "$(ci uninstall --agent opencode)"
+else
+    check "install opencode refuses without symlinks" "cannot create symlinks" "$(ci install --agent opencode || true)"
+    [ ! -e "$ih/.config/opencode/plugins/continuum.js" ] && ok "no stale copy of the opencode plugin" || bad "no stale copy of the opencode plugin" "copied"
+fi
+if [ -L "$ih/lncheck" ]; then
+    printf '{}' > "$ih/real.json"; rm -f "$ih/.cursor/hooks.json"; ln -s "$ih/real.json" "$ih/.cursor/hooks.json"
+    out=$(ci install --agent cursor) || true
+    check "install refuses a symlinked config" "is a symlink" "$out"
+    [ -L "$ih/.cursor/hooks.json" ] && ok "the symlink stays a symlink" || bad "the symlink stays a symlink" "replaced"
+fi
 check "claude installs as a plugin" "claude plugin install continuum@continuum" "$(ci install --agent claude)"
 
 echo "watch --ide (JetBrains MCP):"

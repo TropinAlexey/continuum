@@ -820,7 +820,14 @@ cmd_install() {
             if [ -L "$f" ] && [ "$(readlink "$f")" = "$src" ]; then echo "already installed: $f"; return 0; fi
             [ -e "$f" ] || [ -L "$f" ] && { echo "continuum install: $f exists and is not ours; remove it, then: ln -s '$src' '$f'" >&2; exit 1; }
             [ -n "$dry" ] && { echo "would link $f -> $src"; return 0; }
-            mkdir -p "$(dirname "$f")" && ln -s "$src" "$f" && echo "linked $f -> $src (restart opencode)"
+            mkdir -p "$(dirname "$f")" && ln -s "$src" "$f" || exit 1
+            # Git Bash without symlink support copies instead: a stale copy that never
+            # updates and that uninstall cannot recognize. Undo it and say so.
+            if [ ! -L "$f" ]; then
+                rm -f "$f"
+                echo "continuum install: this shell cannot create symlinks (Git Bash: set MSYS=winsymlinks:nativestrict and enable Developer Mode), or link $f to $src yourself" >&2; exit 1
+            fi
+            echo "linked $f -> $src (restart opencode)"
         else
             if [ -L "$f" ] && [ "$(readlink "$f")" = "$src" ]; then
                 [ -n "$dry" ] && { echo "would remove $f"; return 0; }
