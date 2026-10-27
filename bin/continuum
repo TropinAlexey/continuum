@@ -7,6 +7,8 @@
 #   continuum providers         list available providers
 #   continuum check [--session ID] [--agent NAME]
 #                               print a warning if a new tier was crossed, else nothing
+#   continuum limit-hit [session] [agent] [dir]
+#                               the limit ran out mid-turn: log, notify, note for next start
 #   continuum watch [seconds]   poll until the threshold is crossed, then say so
 #   continuum resume HH:MM [dir] [prompt]
 #                               schedule the agent to pick up after the reset
@@ -168,7 +170,7 @@ cmd_resume() {
         printf "\n### end (exit %s) - %s\n" "$status" "$dir"
         if command -v osascript >/dev/null 2>&1; then
             word="finished"; [ "$status" -eq 0 ] || word="FAILED (exit $status)"
-            osascript -e "display notification \"$(basename "$dir")\" with title \"continuum resume $word\"" >/dev/null 2>&1 || true
+            osascript -e "on run argv" -e "display notification (item 1 of argv) with title (item 2 of argv)" -e "end run" "$(basename "$dir")" "continuum resume $word" >/dev/null 2>&1 || true
         elif command -v notify-send >/dev/null 2>&1; then
             notify-send "continuum resume finished (exit $status)" "$dir" || true
         fi
@@ -201,7 +203,7 @@ cmd_resume() {
     <string>-i</string>
     <string>sh</string>
     <string>-c</string>
-    <string>cd '${sq_dir}' &amp;&amp; printf '\n### %s - resumed in %s\n\n' "\$(date '+%Y-%m-%d %H:%M:%S')" '${sq_dir}' &gt;&gt; '${sq_log}' &amp;&amp; ${escaped_cmd} &gt;&gt; '${sq_log}' 2&gt;&amp;1; s=\$?; printf '\n### end (exit %s) - %s\n' "\$s" '${sq_dir}' &gt;&gt; '${sq_log}'; word=finished; [ "\$s" -eq 0 ] || word="FAILED (exit \$s)"; osascript -e "display notification \"\$(basename '${sq_dir}')\" with title \"continuum resume \$word\"" 2&gt;/dev/null || true; ${wl_cleanup}launchctl remove '${label}' 2&gt;/dev/null; rm -f '${plist}'</string>
+    <string>cd '${sq_dir}' &amp;&amp; printf '\n### %s - resumed in %s\n\n' "\$(date '+%Y-%m-%d %H:%M:%S')" '${sq_dir}' &gt;&gt; '${sq_log}' &amp;&amp; ${escaped_cmd} &gt;&gt; '${sq_log}' 2&gt;&amp;1; s=\$?; printf '\n### end (exit %s) - %s\n' "\$s" '${sq_dir}' &gt;&gt; '${sq_log}'; word=finished; [ "\$s" -eq 0 ] || word="FAILED (exit \$s)"; osascript -e "on run argv" -e "display notification (item 1 of argv) with title (item 2 of argv)" -e "end run" "\$(basename '${sq_dir}')" "continuum resume \$word" 2&gt;/dev/null || true; ${wl_cleanup}launchctl remove '${label}' 2&gt;/dev/null; rm -f '${plist}'</string>
   </array>
   <key>StartCalendarInterval</key><dict>
     <key>Hour</key><integer>$(date -r "$fire_epoch" +%H | sed 's/^0//')</integer>
@@ -429,6 +431,74 @@ cmd_check() {
     printf '%s\n' "$reason"
 }
 
+# The limit ran out in the middle of a turn (StopFailure / rate_limit in Claude Code and
+# Junie). Nobody can be asked at that moment, so this only tells: a line in the resume
+# log, a desktop notification, a note the next session start shows once. With
+# CONTINUUM_RESUME_ON_LIMIT=1 - consent the user gave in advance - it also schedules a
+# resume for the reset. Agent-neutral: adapters pass session, agent and directory.
+# Prints the message; always exits 0, a failing hook must not spam the user.
+cmd_limit_hit() {
+    sid=$(printf '%s' "${1:-unknown}" | tr -c 'A-Za-z0-9_-' '_')
+    agent="${2:-${CONTINUUM_AGENT:-claude}}"
+    dir="${3:-$PWD}"
+    [ -n "${CONTINUUM_OFF:-}" ] && return 0
+    mkdir -p "$CNT_STATE" 2>/dev/null || return 0
+
+    # No network from a turn that just failed on the limit: the exhausted window is the
+    # cached line with the highest utilization (primary or weekly).
+    cache_key=$(printf '%s' "$CNT_PROVIDER" | tr -c 'A-Za-z0-9_,-' '_')
+    best=$(awk 'NF >= 3 { u = $2 + 0; if (!n || u > bu) { bu = u; n = NR; r = $3 } }
+                END { if (n) print n, r }' "$CNT_STATE/.continuum-cache-$cache_key" 2>/dev/null)
+    nr=${best%% *}; reset=${best#* }
+    case "$reset" in ''|*[!0-9]*|?????????????*) reset="" ;; esac
+    when=""
+    if [ -n "$reset" ]; then
+        if [ "$nr" = 1 ]; then when=$(cnt_epoch_hhmm "$reset" 2>/dev/null || true)
+        else when=$(cnt_epoch_dayhhmm "$reset" 2>/dev/null || true); fi
+    fi
+
+    # Once per session per window.
+    flag="$CNT_STATE/.continuum-limit-$sid"
+    [ -f "$flag" ] && [ "$(cat "$flag" 2>/dev/null)" = "${reset:--}" ] && return 0
+    printf '%s' "${reset:--}" > "$flag" 2>/dev/null || true
+
+    msg="limit hit in $(basename "$dir")${when:+, resets ${when}}"
+    if [ "${CONTINUUM_RESUME_ON_LIMIT:-}" = 1 ]; then
+        now=$(date +%s)
+        if [ -z "$reset" ]; then
+            msg="$msg. No reset time known, so no resume was scheduled - run continuum resume with your task"
+        elif [ "$reset" -le "$now" ] || [ $((reset - now)) -gt 86400 ]; then
+            # `continuum resume` takes HH:MM (the next 24 h); a weekly reset days away
+            # would fire too early and hit the limit again.
+            msg="$msg. The reset is more than a day away, so no resume was scheduled - run continuum resume with your task then"
+        else
+            rflag="$CNT_STATE/.continuum-limit-resume-$(printf '%s' "$dir" | cksum | cut -d' ' -f1)"
+            if [ "$(cat "$rflag" 2>/dev/null)" = "$reset" ]; then
+                msg="$msg. A resume for this directory is already scheduled"
+            else
+                hhmm=$(cnt_epoch_hhmm "$reset" 90)
+                task="The previous turn stopped on the usage limit. Continue the interrupted work from where it stopped"
+                if out=$(CONTINUUM_AGENT="$agent"; cmd_resume "$hhmm" "$dir" "$task" 2>&1); then
+                    printf '%s' "$reset" > "$rflag" 2>/dev/null || true
+                    msg="$msg. Resume scheduled for $hhmm (CONTINUUM_RESUME_ON_LIMIT=1). $(printf '%s' "$out" | grep -E '^(Cancel|would)' | head -1)"
+                else
+                    msg="$msg. Scheduling the resume failed: $(printf '%s' "$out" | head -1)"
+                fi
+            fi
+        fi
+    else
+        msg="$msg - run continuum resume with your task"
+    fi
+
+    # The directory name ends up in the log, the note and the agent's context at the next
+    # session start: no control characters (a newline or tab would forge note lines).
+    msg=$(printf '%s' "$msg" | tr -d '\000-\037\177')
+    printf '\n### limit hit - %s - %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$msg" >> "$CNT_STATE/continuum-resume.log" 2>/dev/null || true
+    printf '%s\t%s\n' "$(date +%s)" "$msg" >> "$CNT_STATE/.continuum-limit-notes" 2>/dev/null || true
+    cnt_notify "continuum" "$msg"
+    printf '%s\n' "$msg"
+}
+
 # Harness-independent fallback: no hooks, no plugin, works with any agent in any
 # shell. Poll until the threshold is crossed, say so, exit. Run it in a spare pane.
 cmd_watch() {
@@ -546,7 +616,7 @@ _sl_set() {
 
 cmd_cleanup() {
     cleaned=0
-    for f in "$CNT_STATE"/.continuum-warned-* "$CNT_STATE"/.continuum-warned7d-* "$CNT_STATE"/.continuum-cache-* "$CNT_STATE"/.continuum-wakelock-*; do
+    for f in "$CNT_STATE"/.continuum-warned-* "$CNT_STATE"/.continuum-warned7d-* "$CNT_STATE"/.continuum-cache-* "$CNT_STATE"/.continuum-wakelock-* "$CNT_STATE"/.continuum-limit-*; do
         [ -f "$f" ] || continue
         age=$(find "$f" -mmin +1440 2>/dev/null)
         if [ -n "$age" ]; then
@@ -562,6 +632,7 @@ case "${1:-}" in
     reset)      cmd_reset ;;
     providers)  cnt_providers ;;
     check)      shift; cmd_check "$@" ;;
+    limit-hit)  shift; cmd_limit_hit "$@" ;;
     watch)      shift; cmd_watch "$@" ;;
     resume)     shift; cmd_resume "$@" ;;
     estimate)   cmd_estimate ;;

@@ -171,8 +171,18 @@ function Get-CntHhmmDelay {
 #
 # WARNING: returns your OAuth access token. Never write it to a log or transcript.
 # Desktop notification, best-effort
+# CONTINUUM_NOTIFY_CMD replaces the notifier (tests, or another tool): it gets title and
+# message as two arguments, same as in lib/core.sh.
 function Send-CntNotification {
     param([string]$Title, [string]$Message)
+    if ($env:CONTINUUM_NOTIFY_CMD) {
+        try {
+            $parts = @($env:CONTINUUM_NOTIFY_CMD -split '\s+' | Where-Object { $_ })
+            $exe = $parts[0]; $rest = @($parts | Select-Object -Skip 1)
+            & $exe @rest $Title $Message 2>$null | Out-Null
+        } catch {}
+        return
+    }
     try {
         [void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
         $n = New-Object System.Windows.Forms.NotifyIcon

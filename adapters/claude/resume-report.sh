@@ -14,6 +14,17 @@ elif [ -n "${XDG_STATE_HOME:-}" ]; then CNT_STATE="$XDG_STATE_HOME/continuum"
 else CNT_STATE="$HOME/.local/state/continuum"; fi
 
 LOG="$CNT_STATE/continuum-resume.log"
+
+# `continuum limit-hit` leaves a note when the limit ran out mid-turn; show it at the
+# next session start, once (last 24 h), without control characters.
+notes="$CNT_STATE/.continuum-limit-notes"
+if [ -f "$notes" ]; then
+    awk -F '\t' -v cutoff="$(( $(date +%s) - 86400 ))" '$1 + 0 >= cutoff && NF >= 2 {
+        s = $2; gsub(/[\001-\037\177]/, "", s); print "[continuum] " s
+    }' "$notes"
+    rm -f "$notes"
+fi
+
 [ -f "$LOG" ] || exit 0
 
 now=$(date +%s)

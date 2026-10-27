@@ -12,7 +12,8 @@ Every script has a PowerShell twin (`.ps1`) with the same behavior.
 | `PostToolUse` | `tool-check.sh` | The same warning after each tool call, as `hookSpecificOutput.additionalContext`. Never blocks. Silent when the event carries `agent_id` (a subagent). |
 | `PreToolUse` | `frugal-gate.sh` | Blocks the `Agent` tool when `CONTINUUM_FRUGAL=1`. |
 | `PreToolUse` | `tool-check.sh` | Exits at once in Claude Code. Junie, which has no `PostToolUse`, gets its mid-turn warning here. |
-| `SessionStart` | `resume-report.sh` | Summarizes `continuum resume` runs finished in the last 24 hours, so the user sees the results on session start. |
+| `StopFailure` (`rate_limit`) | `stop-failure.sh` | The limit ran out mid-turn; no decision control. `continuum limit-hit`: notification, resume-log line, a note for the next session start; with `CONTINUUM_RESUME_ON_LIMIT=1` also schedules a resume for the reset. |
+| `SessionStart` | `resume-report.sh` | Summarizes `continuum resume` runs finished in the last 24 hours and shows a limit-hit note once, so the user sees the results on session start. |
 | `SessionStart` | `setup-statusline.sh` | Records where the code lives, adds `statusLine` to `settings.json` if there is none, and keeps the copy in `~/.claude/hooks/` current. |
 | status line | `statusline.sh` | Renders usage in the status bar from the cache, refreshing it when stale. |
 

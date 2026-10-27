@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.2-brightgreen.svg" alt="version: 0.7.0"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.3-brightgreen.svg" alt="version: 0.7.0"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -51,7 +51,8 @@ What the core reads, sends, writes and runs. Each adapter adds its own list, in 
 - **Network.** Only the provider talks to the network. The default `anthropic` provider makes one `GET https://api.anthropic.com/api/oauth/usage` with an OAuth token in the `Authorization` header. This is an **undocumented endpoint**, not a public API, and it may change. The result is cached for 10 minutes. The optional `spend` provider calls `https://api.anthropic.com/v1/billing/usage` with `ANTHROPIC_ADMIN_KEY`. Nothing else leaves the machine.
 - **Credentials.** The `anthropic` provider looks for the token in this order: `$CLAUDE_CODE_OAUTH_TOKEN`, the macOS Keychain entry `Claude Code-credentials`, then `~/.claude/.credentials.json`. It goes only to `api.anthropic.com` and is never written anywhere.
 - **Files.** Cache, flags, logs and config go to `~/.local/state/continuum` (see [Configuration](#configuration)). The CLI installer puts the code in `~/.continuum` and a symlink to it on your `PATH`.
-- **Unattended runs.** `continuum resume` starts your agent with nobody watching, using the agent's preset or `CONTINUUM_RESUME_CMD`; inside a bb thread it sends the task to that thread with `bb thread tell` instead. It runs only when you ask for it, by choosing "save and resume" or by running the command. Keep the task narrow, and don't point it at anything you wouldn't let a stranger merge.
+- **Notifications.** A desktop notification (`osascript` / `notify-send`, or your `CONTINUUM_NOTIFY_CMD`) when a resume run ends and when the limit runs out mid-turn. The text goes to `osascript` as arguments, never as script.
+- **Unattended runs.** `continuum resume` starts your agent with nobody watching, using the agent's preset or `CONTINUUM_RESUME_CMD`; inside a bb thread it sends the task to that thread with `bb thread tell` instead. It runs only when you ask for it: by choosing "save and resume", by running the command, or by setting `CONTINUUM_RESUME_ON_LIMIT=1` in advance, which schedules a resume when the limit runs out in the middle of a turn. Keep the task narrow, and don't point it at anything you wouldn't let a stranger merge.
 
 ## What happens
 
@@ -165,6 +166,8 @@ macOS, Linux, FreeBSD/OpenBSD/NetBSD, Windows (Git Bash or PowerShell). POSIX `s
 | `CONTINUUM_PROVIDER` | `anthropic` | Provider(s), comma-separated. |
 | `CONTINUUM_AGENT` | `claude` | Agent: `claude`, `codex`, `gemini`, `cursor` or `opencode`. Picks the `resume` preset and the wording of `continuum check` (`generic` when unset there). |
 | `CONTINUUM_RESUME_CMD` | preset for the agent | Agent command for `resume`. `{prompt}` is the task. Wins over the preset. |
+| `CONTINUUM_RESUME_ON_LIMIT` | off | `1`: when the limit runs out mid-turn (`StopFailure`), schedule a resume for the reset with the agent's preset. Only for a reset within 24 h; one per directory per window. Consent given in advance. |
+| `CONTINUUM_NOTIFY_CMD` | `osascript` / `notify-send` | Replace the desktop notifier; gets title and message as two arguments. |
 | `CONTINUUM_DRY_RUN` | — | `resume` prints the plan instead of scheduling it. |
 | `CONTINUUM_OFF` | — | Turns the warning off (`continuum check` and every adapter hook). |
 | `CONTINUUM_FRUGAL` | — | `1` = frugal mode: adapters that can, block subagent calls. |
@@ -201,7 +204,7 @@ On Claude Code older than 2.1.275, use two steps instead: `/plugin marketplace a
 
 **What it adds:**
 
-- **Hooks.** `Stop`: at the end of a turn, a warning becomes `{"decision":"block","reason":"..."}`, so Claude goes on and asks you instead of stopping. `PostToolUse`: after each tool call, the same warning as `additionalContext`, about 0.1 s per call, silent inside subagents. `PreToolUse`: blocks the `Agent` tool, only in frugal mode (`CONTINUUM_FRUGAL=1`). `SessionStart`: the resume report and status line upkeep.
+- **Hooks.** `Stop`: at the end of a turn, a warning becomes `{"decision":"block","reason":"..."}`, so Claude goes on and asks you instead of stopping. `PostToolUse`: after each tool call, the same warning as `additionalContext`, about 0.1 s per call, silent inside subagents. `PreToolUse`: blocks the `Agent` tool, only in frugal mode (`CONTINUUM_FRUGAL=1`). `StopFailure` (`rate_limit`): the limit ran out mid-turn, so nothing can be asked; a notification, a line in the resume log and a note at the next session start, plus a scheduled resume if you set `CONTINUUM_RESUME_ON_LIMIT=1`. `SessionStart`: the resume report (and that note) and status line upkeep.
 - **Settings.** On session start, if `~/.claude/settings.json` has no `statusLine` at all, the plugin copies its status line script to `~/.claude/hooks/statusline.sh` and adds a `statusLine` entry pointing there. Later it keeps that copy up to date. An existing status line, yours or anyone's, is left alone. The CLI installer does the same.
 - **Questions.** The warning asks Claude to use `AskUserQuestion`.
 - **Resume preset.** `claude --continue -p "<task>" --permission-mode acceptEdits`.
@@ -244,6 +247,11 @@ continuum statusline reset              # back to defaults
       "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/adapters/claude/tool-check.ps1\"",
       "shell": "powershell"
     }]}],
+    "StopFailure": [{ "matcher": "rate_limit", "hooks": [{
+      "type": "command",
+      "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/adapters/claude/stop-failure.ps1\"",
+      "shell": "powershell"
+    }]}],
     "PreToolUse": [{ "hooks": [{
       "type": "command",
       "command": "pwsh -NoProfile -File \"${CLAUDE_PLUGIN_ROOT}/adapters/claude/frugal-gate.ps1\"",
@@ -284,8 +292,8 @@ bb is a desktop app that runs agents in threads, so the warning comes from the a
 ## Contributing
 
 ```
-sh tests/run.sh          # 180 tests, mock provider, no network (also passes under dash)
-pwsh tests/run.ps1       # 150 tests, the same suite for PowerShell
+sh tests/run.sh          # 197 tests, mock provider, no network (also passes under dash)
+pwsh tests/run.ps1       # 160 tests, the same suite for PowerShell
 ```
 
 Every `.sh` change has a matching `.ps1` change, with tests in both suites. Help is welcome with a provider for another budget (OpenAI, Gemini: see [docs/writing-a-provider.md](docs/writing-a-provider.md)) and an adapter for another agent ([docs/harnesses.md](docs/harnesses.md)).

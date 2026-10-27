@@ -19,6 +19,7 @@ project). Nothing else to configure.
 | `Stop` | `stop.sh` | A new tier becomes `{"decision":"block","reason":"..."}`: Junie goes back to the task with the warning before it submits. The hint asks Junie to end its final message with a question to you (it has no question tool). Skips on `stop_hook_active`. |
 | `PreToolUse` | `tool-check.sh` | The same warning in the middle of a task, as `additionalContext`. Junie has no `PostToolUse`; in Claude Code this `PreToolUse` call exits at once and the `PostToolUse` one does the work. |
 | `PreToolUse` | `frugal-gate.sh` | Blocks the `Agent` tool when `CONTINUUM_FRUGAL=1`. |
+| `StopFailure` (`rate_limit`) | `stop-failure.sh` | The limit ran out mid-turn; no decision control. `continuum limit-hit`: notification, resume-log line, a note for the next session start; with `CONTINUUM_RESUME_ON_LIMIT=1` also schedules a resume for the reset. |
 | `SessionStart` | `resume-report.sh` | Summarizes `continuum resume` runs finished in the last 24 hours. |
 | `SessionStart` | `setup-statusline.sh` | Does nothing in Junie: Claude Code's settings are not touched. |
 

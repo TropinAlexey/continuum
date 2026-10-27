@@ -1,6 +1,6 @@
 # R4. Limit hit mid-turn: `StopFailure` (rate_limit)
 
-Status: agreed
+Status: done (v0.7.3)
 Date: 2026-10-26
 Roadmap: [2026-10-26-roadmap.md](2026-10-26-roadmap.md)
 
@@ -40,6 +40,17 @@ Codex / Gemini / Cursor / opencode equivalents (after R2).
 provider line (no network call from a failing turn). Notification via the existing
 `osascript` / `notify-send` helpers in core.
 
+Implemented as an agent-neutral core command, like `check`: `continuum limit-hit
+[session] [agent] [dir]` (sh + ps1); `adapters/claude/stop-failure.sh|ps1` only parse the
+event (Junie: directory from `project_path`, its `cwd` is `~/.junie`). The note for R4.3 is
+`$CNT_STATE/.continuum-limit-notes`, shown and removed by `resume-report.sh`.
+Decision (R4.6): `continuum resume` takes HH:MM within the next 24 h, so a resume is
+scheduled only when the exhausted window resets within a day; for a weekly reset days away
+the notification says so and nothing is scheduled. `CONTINUUM_NOTIFY_CMD` swaps the notifier
+(tests). Security autofix found on the way: notification text went into the AppleScript
+source (`osascript -e "display notification \"$msg\""`), so a directory name with a quote
+could run AppleScript; all three call sites now pass the text as argv.
+
 ## Acceptance
 
 Tests: rate_limit event → log line + notification command (stubbed); other `error` values →
@@ -47,4 +58,5 @@ nothing; second event in the same window → nothing.
 
 ## Later
 
-—
+- Weekly reset days away: schedule by epoch instead of HH:MM (needs `continuum resume` to
+  accept a date; separate spec).

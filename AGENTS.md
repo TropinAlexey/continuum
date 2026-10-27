@@ -19,7 +19,7 @@
 
 1. **Provider** (`providers/anthropic.sh`) — `curl` к usage-endpoint, печатает `5h 86.5 1783000000` (окно, %, epoch ресета). Весь контракт провайдера — эти 3 колонки. Свои провайдеры: `docs/writing-a-provider.md`.
 2. **`continuum check [--session ID] [--agent NAME]`** — агент-нейтральное ядро предупреждения: 10-мин кэш, тиры, флаги, текст. Пусто = молчать, иначе одна строка текста; exit 0 всегда (кроме плохих аргументов). Тиры: `80→90→95→99` (основное окно), `70→85→95` (weekly). Каждый тир один раз, пере-вооружается при спаде usage. Формулировка «как спросить» по агенту — `cnt_ask_hint`.
-3. **Адаптер Claude** (`adapters/claude/`): `stop.sh` (Stop-событие → `check` → blocking JSON), `tool-check.sh` (PostToolUse → `check` → `additionalContext`, посреди хода; молчит в сабагентах по `agent_id`; флаги общие со Stop), `frugal-gate.sh` (в `CONTINUUM_FRUGAL=1` блокирует `Agent`), `statusline.sh`, `setup-statusline.sh`, `resume-report.sh` (+ `.ps1`). `hooks/*.sh|ps1` — форвардеры для старых конфигов, удалить в v0.8 (в v0.7.0 оставлены, чтобы релиз адаптеров не ломал старые settings.json).
+3. **Адаптер Claude** (`adapters/claude/`): `stop.sh` (Stop-событие → `check` → blocking JSON), `tool-check.sh` (PostToolUse → `check` → `additionalContext`, посреди хода; молчит в сабагентах по `agent_id`; флаги общие со Stop), `frugal-gate.sh` (в `CONTINUUM_FRUGAL=1` блокирует `Agent`), `stop-failure.sh` (StopFailure rate_limit → `continuum limit-hit`), `statusline.sh`, `setup-statusline.sh`, `resume-report.sh` (+ `.ps1`). `hooks/*.sh|ps1` — форвардеры для старых конфигов, удалить в v0.8 (в v0.7.0 оставлены, чтобы релиз адаптеров не ломал старые settings.json).
 4. **Skill** (`skills/session-budget/SKILL.md`) — что делать при предупреждении: показать ситуацию, спросить пользователя через AskUserQuestion (на его языке), никогда не решать за него. Опции: wrap up / finish batch / save+resume / frugal / cheap-only / ignore.
 5. **`continuum resume`** — планирует headless-команду агента после ресета: `CONTINUUM_RESUME_CMD` → пресет `CONTINUUM_AGENT` (по умолчанию `claude`; пресеты других агентов появятся с их адаптерами) → ошибка. Планировщик по ОС: launchd / systemd-run / daemon(8) / detached process / nohup-fallback. Вейклок + нотификация.
 6. **Состояние** — `CNT_STATE`: `$CONTINUUM_STATE_DIR` → `$XDG_STATE_HOME/continuum` → `~/.local/state/continuum` (одинаково в sh и ps1). НЕ `~/.continuum` — там код от инсталлятора (`CONTINUUM_HOME`). Разовая миграция из `~/.claude` (копирует conf/логи/провайдеры, не кэш; маркер `.migrated`). `$CNT_STATE/root` — указатель на код для скриптов без окружения (копия statusline в `~/.claude/hooks/`). Токен Claude (`~/.claude/.credentials.json`) ищет провайдер `anthropic`, не ядро.
@@ -45,8 +45,8 @@
 ## Команды
 
 ```sh
-sh tests/run.sh          # 180 тестов, mock, без сети (эталон; проходит и под dash)
-pwsh tests/run.ps1       # 150 тестов, та же сюита для PowerShell
+sh tests/run.sh          # 197 тестов, mock, без сети (эталон; проходит и под dash)
+pwsh tests/run.ps1       # 160 тестов, та же сюита для PowerShell
 continuum status         # 5h 86.5% resets at 21:40 + weekly строка
 continuum reset          # HH:MM ресета (+90s, для планировщика)
 continuum estimate       # сколько осталось at this pace
@@ -56,7 +56,11 @@ continuum check --session ID --agent claude  # ядро предупрежден
 continuum resume "$(continuum reset)" "$PWD" "конкретная задача"  # NEVER generic "continue"
 ```
 
-## Текущее состояние (2026-10-26)
+## Текущее состояние (2026-10-27)
+
+- **v0.7.3 — R4: лимит кончился посреди хода** (спека `docs/superpowers/specs/2026-10-26-r4-stopfailure-rate-limit.md`, первая по пайплайну). Хук `StopFailure` (matcher `rate_limit`, Claude Code и Junie) → `adapters/claude/stop-failure.sh|ps1` → ядро `continuum limit-hit [session] [agent] [dir]`: уведомление, строка `### limit hit` в логе resume, заметка `.continuum-limit-notes` → `resume-report.sh` покажет при следующем старте один раз. Окно — то, что исчерпано (по кэшу, без сети). С `CONTINUUM_RESUME_ON_LIMIT=1` (согласие заранее) ещё и `continuum resume` на сброс по пресету агента, только если сброс в ближайшие 24 ч, один на каталог за окно. `CONTINUUM_NOTIFY_CMD` подменяет уведомлялку. Секьюрити-автофиксы: текст уведомлений шёл в исходник AppleScript (`osascript -e "display notification \"$msg\""`) → теперь argv (3 места); управляющие символы из имени каталога вычищаются (нельзя подделать строки заметок/контекста). `continuum cleanup` чистит `.continuum-limit-*`. **Тесты: sh 197/197 (и под dash), ps 160/160.**
+
+## Ранее (2026-10-26)
 
 - **v0.7.2 — выпущен 2026-10-26** (тег + GitHub Release, CI зелёный на 6 джобах; включает v0.7.1: bb + сброс недельного окна). **Junie (JetBrains) + фиксы**: Junie CLI ставит Claude-плагины как расширения и гоняет их `hooks/hooks.json` (`${CLAUDE_PLUGIN_ROOT}`), так что отдельных скриптов нет — Claude-адаптер узнаёт Junie по `project_path` в событии → `--agent junie` (свой hint: вопрос в конце итогового сообщения, без AskUserQuestion). Junie не шлёт `PostToolUse` → `tool-check.sh` подключён и на `PreToolUse` (в Claude сразу выходит). `setup-statusline.sh` в Junie ничего не делает. Пресет `junie --skip-update-check --resume --task "{prompt}"`. Вживую (Junie CLI 26.10.20, batch): Stop-предупреждение дошло, `--resume --task` продолжает ту же сессию. В IDE (RustRover и др.) агент чата — по выбору, всё через ACP: Junie там хуки не вызывает (их доки), Claude Agent / Codex в чате ещё не проверены (беклог: если их ACP-мост грузит пользовательские хуки, как Agent SDK в bb, — работает без доработок). Доки `adapters/junie/README.md`. Плюс фиксы: 30-сек гейт statusline — метка `$cache.at` вместо `find -mmin -0.5` (bfs на macOS его не понимал → запрос на каждую отрисовку); уборка `$cache.<pid>.tmp` старше 10 мин (sh + ps1); PSScriptAnalyzer: `$event`→`$hookEvent` (автопеременная), `Invoke-History`→`Invoke-CntHistory` (перекрывал командлет); CI `actions/checkout@v5`. RustRover подключён к Claude Code как MCP `rustrover` (`http://127.0.0.1:64522/stream`, как `rider`). **Тесты: sh 180/180 (и под dash), ps 150/150.**
 

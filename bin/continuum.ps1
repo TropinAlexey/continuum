@@ -345,6 +345,97 @@ function Invoke-Check {
     } catch { return }
 }
 
+# The limit ran out in the middle of a turn (StopFailure / rate_limit in Claude Code and
+# Junie); mirrors `continuum limit-hit`. Nobody can be asked at that moment, so this only
+# tells: a line in the resume log, a desktop notification, a note the next session start
+# shows once. With CONTINUUM_RESUME_ON_LIMIT=1 - consent given in advance - it also
+# schedules a resume for the reset. Never throws: a failing hook must not spam the user.
+function Invoke-LimitHit {
+    param([string]$SessionId, [string]$AgentName, [string]$Dir)
+    try {
+        $sid = ($(if ($SessionId) { $SessionId } else { 'unknown' }) -replace '[^A-Za-z0-9_-]', '_')
+        $agentName = $AgentName
+        if (-not $agentName) { $agentName = $(if ($env:CONTINUUM_AGENT) { $env:CONTINUUM_AGENT } else { 'claude' }) }
+        if (-not $Dir) { $Dir = (Get-Location).Path }
+        if ($env:CONTINUUM_OFF) { return }
+        New-Item -ItemType Directory -Force -Path $script:CntState | Out-Null
+
+        # No network from a turn that just failed on the limit: the exhausted window is the
+        # cached line with the highest utilization (primary or weekly).
+        $cacheKey = ($script:CntProvider -replace '[^A-Za-z0-9_,-]', '_')
+        $cache = Join-Path $script:CntState ".continuum-cache-$cacheKey"
+        $nr = 0; $reset = ''; $bu = -1.0
+        if (Test-Path $cache) {
+            $i = 0
+            foreach ($line in [System.IO.File]::ReadAllLines($cache)) {
+                $i++
+                $p = $line.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+                if ($p.Count -lt 3) { continue }
+                $u = 0.0
+                if (-not [double]::TryParse($p[1], [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$u)) { continue }
+                if ($nr -eq 0 -or $u -gt $bu) { $bu = $u; $nr = $i; $reset = $p[2] }
+            }
+        }
+        if ($reset -notmatch '^[0-9]{1,12}$') { $reset = '' }
+        $when = ''
+        if ($reset) {
+            if ($nr -eq 1) { $when = ConvertTo-CntHhmm ([int64]$reset) } else { $when = ConvertTo-CntDayHhmm ([int64]$reset) }
+        }
+
+        # Once per session per window.
+        $flag = Join-Path $script:CntState ".continuum-limit-$sid"
+        $mark = $(if ($reset) { $reset } else { '-' })
+        if ((Test-Path $flag) -and ([System.IO.File]::ReadAllText($flag).Trim() -eq $mark)) { return }
+        [System.IO.File]::WriteAllText($flag, $mark)
+
+        $msg = "limit hit in $(Split-Path -Leaf $Dir)"
+        if ($when) { $msg += ", resets $when" }
+        if ($env:CONTINUUM_RESUME_ON_LIMIT -eq '1') {
+            $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            if (-not $reset) {
+                $msg += '. No reset time known, so no resume was scheduled - run continuum resume with your task'
+            } elseif ([int64]$reset -le $now -or ([int64]$reset - $now) -gt 86400) {
+                # `continuum resume` takes HH:MM (the next 24 h); a weekly reset days away
+                # would fire too early and hit the limit again.
+                $msg += '. The reset is more than a day away, so no resume was scheduled - run continuum resume with your task then'
+            } else {
+                $sha = [System.Security.Cryptography.SHA256]::Create()
+                $hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Dir))[0..7] | ForEach-Object { $_.ToString('x2') })
+                $rflag = Join-Path $script:CntState ".continuum-limit-resume-$hash"
+                if ((Test-Path $rflag) -and ([System.IO.File]::ReadAllText($rflag).Trim() -eq $reset)) {
+                    $msg += '. A resume for this directory is already scheduled'
+                } else {
+                    $hhmm = ConvertTo-CntHhmm ([int64]$reset) 90
+                    $task = 'The previous turn stopped on the usage limit. Continue the interrupted work from where it stopped'
+                    $prev = $env:CONTINUUM_AGENT
+                    try {
+                        $env:CONTINUUM_AGENT = $agentName
+                        $out = @(Invoke-Resume $hhmm $Dir $task) -join "`n"
+                        [System.IO.File]::WriteAllText($rflag, $reset)
+                        $first = @($out -split "`n" | Where-Object { $_ -match '^(would|Scheduled)' })[0]
+                        $msg += ". Resume scheduled for $hhmm (CONTINUUM_RESUME_ON_LIMIT=1). $first"
+                    } catch {
+                        $msg += ". Scheduling the resume failed: $($_.Exception.Message)"
+                    } finally {
+                        if ($null -eq $prev) { Remove-Item Env:CONTINUUM_AGENT -ErrorAction SilentlyContinue } else { $env:CONTINUUM_AGENT = $prev }
+                    }
+                }
+            }
+        } else {
+            $msg += ' - run continuum resume with your task'
+        }
+
+        # The directory name ends up in the log, the note and the agent's context at the next
+        # session start: no control characters (a newline or tab would forge note lines).
+        $msg = $msg -replace '[\x00-\x1f\x7f]', ''
+        $stamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        Add-Content -Path (Join-Path $script:CntState 'continuum-resume.log') -Value "`n### limit hit - $stamp - $msg"
+        Add-Content -Path (Join-Path $script:CntState '.continuum-limit-notes') -Value ("{0}`t{1}" -f [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(), $msg)
+        Send-CntNotification 'continuum' $msg
+        $msg
+    } catch { return }
+}
+
 # Harness-independent fallback: no hooks, no plugin, works with any agent in any
 # shell. Poll until the threshold is crossed, say so, exit. Run it in a spare pane.
 function Invoke-Watch {
@@ -406,7 +497,7 @@ function Invoke-CntHistory {
 function Invoke-Cleanup {
     $cleaned = 0
     $cutoff = (Get-Date).AddHours(-24)
-    foreach ($pattern in @('.continuum-warned-*', '.continuum-warned7d-*', '.continuum-cache-*', '.continuum-wakelock-*')) {
+    foreach ($pattern in @('.continuum-warned-*', '.continuum-warned7d-*', '.continuum-cache-*', '.continuum-wakelock-*', '.continuum-limit-*')) {
         # NB: -Force is load-bearing - without it the provider skips dotfiles
         # on some platforms (macOS) and cleanup would silently clean nothing.
         Get-ChildItem -Path $script:CntState -Force -Filter $pattern -ErrorAction SilentlyContinue |
@@ -486,6 +577,7 @@ switch ($Command) {
     'estimate'  { Invoke-Estimate }
     'providers' { Get-CntProviders }
     'check'     { Invoke-Check @($Arg1, $Arg2, $Arg3, $Arg4) $Session $Agent }
+    'limit-hit' { Invoke-LimitHit $Arg1 $Arg2 $Arg3 }
     'watch'     { if ($Arg1) { Invoke-Watch ([int]$Arg1) } else { Invoke-Watch } }
     'resume'    { Invoke-Resume $Arg1 $Arg2 $Arg3 }
     'history'   { Invoke-CntHistory }

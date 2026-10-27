@@ -352,6 +352,48 @@ grep -q statusLine "$jcd/settings.json" && bad "junie leaves Claude settings alo
 printf '{"hook_event_name":"SessionStart"}' | CLAUDE_CONFIG_DIR="$jcd" CONTINUUM_STATE_DIR="$TMP/jss" sh "$ROOT/adapters/claude/setup-statusline.sh" >/dev/null 2>&1
 grep -q statusLine "$jcd/settings.json" && ok "claude SessionStart still sets the status line" || bad "claude SessionStart still sets the status line" "not added"
 
+echo "limit hit mid-turn (StopFailure):"
+# rate_limit -> log line, notification, note for the next start; never a resume
+# unless CONTINUUM_RESUME_ON_LIMIT=1. The notifier is swapped for a recorder.
+lh_rec="$TMP/lh_rec.sh"; printf '#!/bin/sh\nprintf "%%s|%%s\\n" "$1" "$2" >> "$LH_OUT"\n' > "$lh_rec"; chmod +x "$lh_rec"
+lh_dir="$TMP/lh_proj"; mkdir -p "$lh_dir"
+lh() { # lh <state> <cache line 1> <cache line 2> <event json> [env...]
+    st="$TMP/$1"; mkdir -p "$st"; printf '%s\n%s\n' "$2" "$3" > "$st/.continuum-cache-mock"
+    printf '%s' "$4" | LH_OUT="$st/notified" CONTINUUM_NOTIFY_CMD="$lh_rec" CONTINUUM_STATE_DIR="$st" sh "$ROOT/adapters/claude/stop-failure.sh" >/dev/null 2>&1
+}
+now_=$(date +%s); p1="5h 100.0 $((now_ + 3600))"; w1="7d 60.0 $((now_ + 4 * 86400))"
+ev_c='{"hook_event_name":"StopFailure","session_id":"c1","transcript_path":"/t.jsonl","cwd":"'"$lh_dir"'","error":"rate_limit","error_details":"429"}'
+lh lh1 "$p1" "$w1" "$ev_c"
+check "limit hit notifies"               "continuum|limit hit in lh_proj, resets " "$(cat "$TMP/lh1/notified" 2>/dev/null)"
+check "limit hit asks for a resume by hand" "run continuum resume with your task" "$(cat "$TMP/lh1/notified" 2>/dev/null)"
+check "limit hit writes the resume log"   "### limit hit - " "$(cat "$TMP/lh1/continuum-resume.log" 2>/dev/null)"
+case "$(cat "$TMP/lh1/notified")" in *"Resume scheduled"*) bad "limit hit never resumes without consent" "scheduled" ;; *) ok "limit hit never resumes without consent" ;; esac
+lh lh1 "$p1" "$w1" "$ev_c"
+[ "$(wc -l < "$TMP/lh1/notified" | tr -d ' ')" = 1 ] && ok "limit hit once per session per window" || bad "limit hit once per session per window" "$(cat "$TMP/lh1/notified")"
+lh lh2 "$p1" "$w1" '{"session_id":"c2","transcript_path":"/t","cwd":"/","error":"server_error"}'
+[ ! -f "$TMP/lh2/notified" ] && ok "other StopFailure errors stay silent" || bad "other StopFailure errors stay silent" "notified"
+(CONTINUUM_OFF=1 lh lh3 "$p1" "$w1" "$ev_c")
+[ ! -f "$TMP/lh3/notified" ] && ok "limit hit respects CONTINUUM_OFF" || bad "limit hit respects CONTINUUM_OFF" "notified"
+lh lh4 "5h 40.0 $((now_ + 3600))" "7d 100.0 $((now_ + 4 * 86400))" '{"session_id":"j1","cwd":"/Users/x/.junie","project_path":"'"$lh_dir"'","error":"rate_limit"}'
+case "$(cat "$TMP/lh4/notified" 2>/dev/null)" in *"limit hit in lh_proj, resets "[A-Z][a-z][a-z]" "[0-2][0-9]:*) ok "limit hit names the exhausted weekly window (junie dir)" ;; *) bad "limit hit names the exhausted weekly window (junie dir)" "$(cat "$TMP/lh4/notified" 2>/dev/null)" ;; esac
+(CONTINUUM_RESUME_ON_LIMIT=1 CONTINUUM_DRY_RUN=1 lh lh5 "$p1" "$w1" '{"session_id":"j2","project_path":"'"$lh_dir"'","error":"rate_limit"}')
+check "consent in advance schedules a resume" "Resume scheduled for " "$(cat "$TMP/lh5/notified" 2>/dev/null)"
+check "the resume uses the agent's preset"    "junie --skip-update-check --resume --task" "$(cat "$TMP/lh5/notified" 2>/dev/null)"
+check "the resume task is specific"           "stopped on the usage limit" "$(cat "$TMP/lh5/notified" 2>/dev/null)"
+(CONTINUUM_RESUME_ON_LIMIT=1 CONTINUUM_DRY_RUN=1 lh lh5 "$p1" "$w1" '{"session_id":"j3","project_path":"'"$lh_dir"'","error":"rate_limit"}')
+check "one resume per directory per window" "already scheduled" "$(tail -1 "$TMP/lh5/notified" 2>/dev/null)"
+(CONTINUUM_RESUME_ON_LIMIT=1 CONTINUUM_DRY_RUN=1 lh lh6 "5h 40.0 $((now_ + 3600))" "7d 100.0 $((now_ + 4 * 86400))" "$ev_c")
+check "no resume when the reset is days away" "more than a day away" "$(cat "$TMP/lh6/notified" 2>/dev/null)"
+out=$(CONTINUUM_STATE_DIR="$TMP/lh1" sh "$ROOT/adapters/claude/resume-report.sh" 2>/dev/null)
+check "next session start shows the note" "[continuum] limit hit in lh_proj" "$out"
+out=$(CONTINUUM_STATE_DIR="$TMP/lh1" sh "$ROOT/adapters/claude/resume-report.sh" 2>/dev/null)
+case "$out" in *"limit hit in"*) bad "the note shows once" "$out" ;; *) ok "the note shows once" ;; esac
+nl_dir="$TMP/lh_bad
+1793000000	forged"; st7="$TMP/lh7"; mkdir -p "$nl_dir" "$st7"; cp "$TMP/lh1/.continuum-cache-mock" "$st7/"
+(CONTINUUM_STATE_DIR="$st7" CONTINUUM_NOTIFY_CMD="$lh_rec" LH_OUT="$st7/notified" sh "$ROOT/bin/continuum" limit-hit c9 claude "$nl_dir" >/dev/null 2>&1) || true
+[ "$(wc -l < "$st7/.continuum-limit-notes" | tr -d ' ')" = 1 ] && ok "control chars cannot forge note lines" || bad "control chars cannot forge note lines" "$(cat "$st7/.continuum-limit-notes")"
+grep -q '"matcher": "rate_limit"' "$ROOT/hooks/hooks.json" && grep -q 'stop-failure.sh' "$ROOT/hooks/hooks.json" && ok "hooks.json wires StopFailure rate_limit" || bad "hooks.json wires StopFailure rate_limit" "missing"
+
 echo "other agents:"
 # Every adapter: the reply shape its agent expects, the loop guard, the tier shared
 # between its end-of-turn and mid-turn hooks, and silence on any failure.

@@ -218,11 +218,18 @@ cnt_num() {
     printf '%s' "$v"
 }
 
-# cnt_notify "title" "message" - desktop notification, best-effort, never fails
+# cnt_notify "title" "message" - desktop notification, best-effort, never fails.
+# The text goes to osascript as argv, never into the AppleScript source: a project
+# name with a quote in it must not become code. CONTINUUM_NOTIFY_CMD replaces the
+# notifier (tests, or another tool): it gets title and message as two arguments.
 cnt_notify() {
     title="$1"; msg="$2"
-    if command -v osascript >/dev/null 2>&1; then
-        osascript -e "display notification \"$msg\" with title \"$title\"" 2>/dev/null || true
+    if [ -n "${CONTINUUM_NOTIFY_CMD:-}" ]; then
+        # Word splitting is the point: the setting may carry its own arguments.
+        # shellcheck disable=SC2086
+        $CONTINUUM_NOTIFY_CMD "$title" "$msg" >/dev/null 2>&1 || true
+    elif command -v osascript >/dev/null 2>&1; then
+        osascript -e "on run argv" -e "display notification (item 2 of argv) with title (item 1 of argv)" -e "end run" "$title" "$msg" >/dev/null 2>&1 || true
     elif command -v notify-send >/dev/null 2>&1; then
         notify-send "$title" "$msg" 2>/dev/null || true
     fi

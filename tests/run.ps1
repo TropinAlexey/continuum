@@ -412,6 +412,58 @@ if ($out -notmatch 'AskUserQuestion') { Ok "junie hint has no AskUserQuestion" }
 Check "claude stays claude with a nested project_path" 'use AskUserQuestion' (Tool 'jn' '{"hook_event_name":"PostToolUse","session_id":"jn","transcript_path":"/t.jsonl","tool_input":{"project_path":"/x"}}')
 $out = Hook 'js' '{"hook_event_name":"Stop","session_id":"js","project_path":"/p","stop_hook_active":false}'
 Check "junie stop names the resume preset" 'CONTINUUM_AGENT=junie continuum resume' $out
+
+Write-Host "limit hit mid-turn (StopFailure):"
+# rate_limit -> log line, notification, note for the next start; never a resume
+# unless CONTINUUM_RESUME_ON_LIMIT=1. The notifier is swapped for a recorder.
+$lhRec = Join-Path $tmp 'lh_rec.ps1'
+Set-Content -Path $lhRec -Value 'Add-Content -Path $env:LH_OUT -Value ("{0}|{1}" -f $args[0], $args[1])'
+$lhDir = Join-Path $tmp 'lh_proj'; New-Item -ItemType Directory -Force -Path $lhDir | Out-Null
+$lhDirJson = $lhDir.Replace('\', '\\')
+$nowLh = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+function Lh ($cfg, $l1, $l2, $stdin) {
+    $st = Join-Path $tmp $cfg; New-Item -ItemType Directory -Force -Path $st | Out-Null
+    Set-Content -Path (Join-Path $st '.continuum-cache-mock') -Value @($l1, $l2)
+    $env:LH_OUT = Join-Path $st 'notified'
+    $env:CONTINUUM_NOTIFY_CMD = "pwsh -NoProfile -File $lhRec"
+    $env:CONTINUUM_STATE_DIR = $st
+    $stdin | & pwsh -NoProfile -File (Join-Path $root 'adapters/claude/stop-failure.ps1') *> $null
+    Remove-Item Env:CONTINUUM_NOTIFY_CMD, Env:LH_OUT -ErrorAction SilentlyContinue
+    $f = Join-Path $st 'notified'
+    if (Test-Path $f) { return (Get-Content -Raw $f) } else { return '' }
+}
+$p1 = "5h 100.0 $($nowLh + 3600)"; $w1 = "7d 60.0 $($nowLh + 4 * 86400)"
+$evC = '{"hook_event_name":"StopFailure","session_id":"c1","transcript_path":"/t.jsonl","cwd":"' + $lhDirJson + '","error":"rate_limit","error_details":"429"}'
+$out = Lh 'lh1' $p1 $w1 $evC
+Check "limit hit notifies" 'continuum|limit hit in lh_proj, resets ' $out
+Check "limit hit asks for a resume by hand" 'run continuum resume with your task' $out
+if ($out -notmatch 'Resume scheduled') { Ok "limit hit never resumes without consent" } else { Bad "limit hit never resumes without consent" $out }
+$out = Lh 'lh1' $p1 $w1 $evC
+if (@($out.Trim() -split "`n").Count -eq 1) { Ok "limit hit once per session per window" } else { Bad "limit hit once per session per window" $out }
+$out = Lh 'lh2' $p1 $w1 '{"session_id":"c2","transcript_path":"/t","error":"server_error"}'
+if (-not $out) { Ok "other StopFailure errors stay silent" } else { Bad "other StopFailure errors stay silent" $out }
+$env:CONTINUUM_RESUME_ON_LIMIT = '1'; $env:CONTINUUM_DRY_RUN = '1'
+$out = Lh 'lh5' $p1 $w1 ('{"session_id":"j2","project_path":"' + $lhDirJson + '","error":"rate_limit"}')
+Check "consent in advance schedules a resume" 'Resume scheduled for ' $out
+Check "the resume uses the agent's preset" 'junie --skip-update-check --resume --task' $out
+$out = Lh 'lh6' "5h 40.0 $($nowLh + 3600)" "7d 100.0 $($nowLh + 4 * 86400)" $evC
+Check "no resume when the reset is days away" 'more than a day away' $out
+Remove-Item Env:CONTINUUM_RESUME_ON_LIMIT, Env:CONTINUUM_DRY_RUN
+# Control characters in the directory name must not forge note lines (not possible on
+# Windows: such names are invalid there).
+if (-not $IsWindows) {
+    $st7 = Join-Path $tmp 'lh7'; New-Item -ItemType Directory -Force -Path $st7 | Out-Null
+    Copy-Item (Join-Path $tmp 'lh1/.continuum-cache-mock') $st7
+    $nlDir = Join-Path $tmp "lh_bad`n1793000000`tforged"; New-Item -ItemType Directory -Force -Path $nlDir | Out-Null
+    $env:CONTINUUM_STATE_DIR = $st7; $env:CONTINUUM_NOTIFY_CMD = "pwsh -NoProfile -File $lhRec"; $env:LH_OUT = Join-Path $st7 'notified'
+    & pwsh -NoProfile -File (Join-Path $root 'bin/continuum.ps1') limit-hit c9 claude $nlDir *> $null
+    Remove-Item Env:CONTINUUM_NOTIFY_CMD, Env:LH_OUT -ErrorAction SilentlyContinue
+    $n = @(Get-Content (Join-Path $st7 '.continuum-limit-notes')).Count
+    if ($n -eq 1) { Ok "control chars cannot forge note lines" } else { Bad "control chars cannot forge note lines" "$n lines" }
+}
+$hj = Get-Content -Raw (Join-Path $root 'hooks/hooks.json')
+if ($hj.Contains('"matcher": "rate_limit"') -and $hj.Contains('stop-failure.sh')) { Ok "hooks.json wires StopFailure rate_limit" } else { Bad "hooks.json wires StopFailure rate_limit" "missing" }
+$env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
 $env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
 
 Write-Host "other agents:"
