@@ -1,6 +1,6 @@
 # R2. Live checks of every adapter
 
-Status: draft
+Status: agreed
 Date: 2026-10-26
 Roadmap: [2026-10-26-roadmap.md](2026-10-26-roadmap.md)
 
@@ -31,8 +31,9 @@ Agents inside a JetBrains IDE's AI chat (owned by R1; same `docs/live-checks.md`
 
 A checklist file `docs/live-checks.md` (agent, version, date, R2.1–R2.3 result, notes).
 Leave state in a scratch `CONTINUUM_STATE_DIR` so real flags are untouched. Real resumes
-(R2.3) run unattended: mock provider, a scratch git repo, a harmless task ("write the date
-to note.txt"), never this repo.
+(R2.3) run unattended. When the user has agreed to them in advance, no further limits apply
+(any repo, real provider, real task); without that consent: mock provider, a scratch git
+repo and a harmless task. Consent for this round: given 2026-10-27.
 
 ## Acceptance
 

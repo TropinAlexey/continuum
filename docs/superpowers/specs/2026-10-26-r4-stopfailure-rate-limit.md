@@ -1,6 +1,6 @@
 # R4. Limit hit mid-turn: `StopFailure` (rate_limit)
 
-Status: draft
+Status: agreed
 Date: 2026-10-26
 Roadmap: [2026-10-26-roadmap.md](2026-10-26-roadmap.md)
 

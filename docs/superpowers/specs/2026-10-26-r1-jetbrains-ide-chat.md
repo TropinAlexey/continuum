@@ -1,6 +1,6 @@
 # R1. Warning in a JetBrains IDE's AI chat
 
-Status: draft
+Status: agreed
 Date: 2026-10-26
 Roadmap: [2026-10-26-roadmap.md](2026-10-26-roadmap.md)
 
