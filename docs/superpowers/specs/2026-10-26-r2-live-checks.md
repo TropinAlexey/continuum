@@ -25,11 +25,14 @@ R2.5. For each agent: does it have a question tool? If yes, a line in `cnt_ask_h
 ## Out of scope
 
 Agents not installed on this machine and not installable for free: mark "not run (needs X)".
+Agents inside a JetBrains IDE's AI chat (owned by R1; same `docs/live-checks.md` file).
 
 ## Design
 
 A checklist file `docs/live-checks.md` (agent, version, date, R2.1–R2.3 result, notes).
-Leave state in a scratch `CONTINUUM_STATE_DIR` so real flags are untouched.
+Leave state in a scratch `CONTINUUM_STATE_DIR` so real flags are untouched. Real resumes
+(R2.3) run unattended: mock provider, a scratch git repo, a harmless task ("write the date
+to note.txt"), never this repo.
 
 ## Acceptance
 

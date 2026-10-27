@@ -83,7 +83,7 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
 
 ## Дальше (беклог, по приоритету)
 
-Порядок и требования — `docs/superpowers/specs/2026-10-26-roadmap.md` (R1 JetBrains-чат через MCP IDE → R2 живые проверки → R3 doctor → R4 StopFailure → R5 install → R6 провайдер). Каждый пункт — своя спека до кода.
+Порядок и требования — `docs/superpowers/specs/2026-10-26-roadmap.md` (R4 StopFailure + resume по согласию заранее → R3 doctor → R2 живые проверки → R1 JetBrains-чат → R5 install → R6 провайдер). Каждый пункт — своя спека до кода.
 
 0. **Из feedback 2026-10-23 (лимит внутри хода, `feedback/2026-10-23-claude-limit-{mid-turn,long-turn}.md`, два случая подряд)**:
    - ~~Проверка порога внутри хода~~ — сделано 2026-10-23 (`tool-check.sh`, PostToolUse). Не сделано: отдельный жёсткий блок `Agent` выше порога — посмотреть по отзывам, хватает ли мягкого предупреждения.

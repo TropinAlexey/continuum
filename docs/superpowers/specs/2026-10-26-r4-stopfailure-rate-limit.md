@@ -14,9 +14,18 @@ watching. Claude Code and Junie both fire `StopFailure` with `error: "rate_limit
 
 R4.1. A `StopFailure` hook (matcher `rate_limit`) in the Claude adapter, so Claude Code and
       Junie both get it: writes a line to the resume log and shows a desktop notification
-      "continuum: limit hit in <project>, resets at HH:MM — `continuum resume HH:MM "<dir>" "<task>"`".
-R4.2. Never schedules a resume by itself (the user decides; the principle of the
+      "continuum: limit hit in <project>, resets at <when> — run `continuum resume` with your task".
+      <when> is the reset of the window that is exhausted (primary or weekly; weekly shown as
+      day + time), not simply the first provider line.
+R4.2. By default never schedules a resume (the user decides; the principle of the
       session-budget skill).
+R4.6. Consent given in advance: with `CONTINUUM_RESUME_ON_LIMIT=1` the hook also schedules
+      `continuum resume` for the reset time of the exhausted window, in the session's
+      directory, with the agent's preset (bb thread / `claude --continue` / `junie --resume` …)
+      and the task "The previous turn stopped on the usage limit. Continue the interrupted
+      work from where it stopped." At most one scheduled resume per directory per window;
+      the notification says it was scheduled and how to cancel it. Off unless the user sets
+      it; documented in Configuration and "What it touches" (unattended runs).
 R4.3. The next `SessionStart` (`resume-report.sh`) mentions the hit and the reset time, once.
 R4.4. Silent and exit 0 on any failure; at most one notification per session per reset window.
 R4.5. sh + ps1, tests in both suites; "What it touches" lists the notification.

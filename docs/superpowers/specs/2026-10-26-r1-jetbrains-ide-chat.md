@@ -13,7 +13,8 @@ terminal already work.
 
 ## Requirements
 
-R1.1. A matrix in `adapters/junie/README.md` (and the agents table): for each chat agent
+R1.1. A matrix in `docs/live-checks.md` (linked from `adapters/junie/README.md` and the agents
+      table): for each chat agent
       (Junie, Claude Agent, Codex) in RustRover 2026.2 — does the Stop warning arrive, does the
       mid-turn one, does `continuum resume` reach the same chat. Every cell from a live run.
 R1.2. If Claude Agent / Codex in the chat already run their own hooks (ACP bridge loads user
@@ -27,8 +28,9 @@ R1.4. Discovery of the MCP endpoint without hard-coded ports (the port changes o
 
 ## Out of scope
 
-Writing a JetBrains plugin. Changing ACP bridges. Windows (`.ps1`) for R1.3 until R1.3 is
-confirmed feasible on sh.
+Writing a JetBrains plugin. Changing ACP bridges. Agents in the IDE's terminal (they are
+covered by their own adapters and by R2). R1.3 may be prototyped in sh first, but it ships
+only with its `.ps1` twin (project convention).
 
 ## Design
 
@@ -42,8 +44,9 @@ lookup must not scan all ports blindly (R1.4).
 ## Acceptance
 
 - R1.1 matrix filled from live runs.
-- R1.3 (if kept): tests with a fake MCP server (sh, `nc` not allowed → a tiny file-based stub
-  through `CONTINUUM_IDE_MCP_URL`), both suites; "What it touches" lists the IDE endpoint.
+- R1.3 (if kept): the transport is swappable (`CONTINUUM_IDE_MCP_CMD`, default `curl`), so
+  tests replace it with a stub that records the request; no network, both suites. "What it
+  touches" lists the IDE endpoint and what is sent there.
 
 ## Later
 
