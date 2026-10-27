@@ -386,16 +386,18 @@ printf '{"data":{"label":"x","usage":12.5,"limit":50,"limit_remaining":37.5,"lim
 printf '{"data":{"usage":9,"limit":10,"limit_remaining":1,"limit_reset":"daily"}}' > "$orr/d/key"
 printf '{"data":{"usage":3,"limit":null,"limit_remaining":null,"limit_reset":null}}' > "$orr/n/key"
 printf '<html>oops</html>' > "$orr/g/key"
-orp() { OPENROUTER_API_KEY=k OPENROUTER_API_BASE="file://$1" sh "$ROOT/providers/openrouter.sh" 2>&1; }
-out=$(orp "$orr/m"); check "openrouter monthly limit" "month 25.0 " "$out"
+# Windows (Git Bash) runs the native curl, which wants file:///C:/..., not an msys path.
+orb() { if command -v cygpath >/dev/null 2>&1; then printf 'file:///%s' "$(cygpath -m "$1")"; else printf 'file://%s' "$1"; fi; }
+orp() { OPENROUTER_API_KEY=k OPENROUTER_API_BASE="$(orb "$1")" sh "$ROOT/providers/openrouter.sh" 2>&1; }
+out=$(orp "$orr/m" || true); check "openrouter monthly limit" "month 25.0 " "$out"
 r=${out##* }; case "$r" in ''|*[!0-9]*) bad "openrouter monthly reset is an epoch" "$out" ;; *) [ "$r" -gt "$(date +%s)" ] && ok "openrouter monthly reset is an epoch" || bad "openrouter monthly reset is an epoch" "$out" ;; esac
-out=$(orp "$orr/d"); check "openrouter daily limit" "day 90.0 " "$out"
+out=$(orp "$orr/d" || true); check "openrouter daily limit" "day 90.0 " "$out"
 out=$(orp "$orr/n") && bad "openrouter without a limit or cap fails" "$out" || check "openrouter without a limit or cap fails" "set CONTINUUM_OPENROUTER_CAP" "$out"
-out=$(CONTINUUM_OPENROUTER_CAP=10 orp "$orr/n"); check "openrouter cap for a key without a limit" "key 30.0 -" "$out"
+out=$(CONTINUUM_OPENROUTER_CAP=10 orp "$orr/n" || true); check "openrouter cap for a key without a limit" "key 30.0 -" "$out"
 out=$(orp "$orr/g") && bad "openrouter garbage response fails" "$out" || ok "openrouter garbage response fails"
 out=$(OPENROUTER_API_BASE=http://example.com sh "$ROOT/providers/openrouter.sh" 2>&1 </dev/null) && bad "openrouter needs a key" "$out" || check "openrouter needs a key" "OPENROUTER_API_KEY not set" "$out"
 out=$(OPENROUTER_API_KEY=k OPENROUTER_API_BASE=http://example.com sh "$ROOT/providers/openrouter.sh" 2>&1) && bad "openrouter refuses a non-https base" "$out" || check "openrouter refuses a non-https base" "must be https://" "$out"
-check "openrouter feeds continuum status" "resets at" "$(OPENROUTER_API_KEY=k OPENROUTER_API_BASE="file://$orr/m" CONTINUUM_PROVIDER=openrouter CONTINUUM_STATE_DIR="$orr/st" sh "$ROOT/bin/continuum" status 2>&1)"
+check "openrouter feeds continuum status" "resets at" "$(OPENROUTER_API_KEY=k OPENROUTER_API_BASE="$(orb "$orr/m")" CONTINUUM_PROVIDER=openrouter CONTINUUM_STATE_DIR="$orr/st" sh "$ROOT/bin/continuum" status 2>&1)"
 
 echo "provider secrets stay out of argv:"
 # A fake curl records its argv and stdin: the secret must be in stdin (-K -), never in argv.
