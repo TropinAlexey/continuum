@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.4-brightgreen.svg" alt="version: 0.7.0"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.8.0-brightgreen.svg" alt="version: 0.8.0"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -24,7 +24,9 @@ AI coding agents have a usage limit per time window, for example 5 hours and a w
 
 - **Warnings at 80 / 90 / 95 / 99 %:** your agent stops and asks you what to do. It never decides for you.
 - **Auto-resume:** schedules your agent for right after the reset, keeps the machine awake and notifies you when it is done.
+- **Limit hit mid-turn:** a notification and a note for the next session, and, if you agreed in advance (`CONTINUUM_RESUME_ON_LIMIT=1`), a resume scheduled for the reset.
 - **Status line:** current usage of both windows, in agents that have a status bar.
+- **`continuum doctor`:** says why a warning did not fire (plugin off, old hooks, stale copies).
 
 The core doesn't know which agent calls it or where the numbers come from: agents plug in through thin [adapters](#agents), budgets through [providers](#providers). POSIX `sh` and `curl`, no dependencies. macOS, Linux, BSD, Windows.
 
@@ -42,13 +44,13 @@ irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | 
 
 The install scripts are short, so read [install.sh](install.sh) / [install.ps1](install.ps1) first if you prefer.
 
-**2. Your agent's adapter**, for warnings inside the session. See [Agents](#agents) for what exists. An agent without an adapter can still call `continuum check` from its own hook, or you can run `continuum watch` in a spare pane.
+**2. Your agent's adapter**, for warnings inside the session. See [Agents](#agents) for what exists; `continuum install --agent codex|gemini|cursor|opencode` wires one into the agent's config for you. An agent without an adapter can still call `continuum check` from its own hook, or you can run `continuum watch` in a spare pane.
 
 ## What it touches
 
 What the core reads, sends, writes and runs. Each adapter adds its own list, in its section below.
 
-- **Network.** Only the provider talks to the network. The default `anthropic` provider makes one `GET https://api.anthropic.com/api/oauth/usage` with an OAuth token in the `Authorization` header. This is an **undocumented endpoint**, not a public API, and it may change. The result is cached for 10 minutes. The optional `spend` provider calls `https://api.anthropic.com/v1/billing/usage` with `ANTHROPIC_ADMIN_KEY`. Nothing else leaves the machine.
+- **Network.** Only the provider talks to the network. The default `anthropic` provider makes one `GET https://api.anthropic.com/api/oauth/usage` with an OAuth token in the `Authorization` header. This is an **undocumented endpoint**, not a public API, and it may change. The result is cached for 10 minutes. The optional `spend` provider calls `https://api.anthropic.com/v1/billing/usage` with `ANTHROPIC_ADMIN_KEY`, the optional `openrouter` provider `GET https://openrouter.ai/api/v1/key` with `OPENROUTER_API_KEY`. `watch --ide` talks only to the IDE on `127.0.0.1`. Nothing else leaves the machine.
 - **Credentials.** The `anthropic` provider looks for the token in this order: `$CLAUDE_CODE_OAUTH_TOKEN`, the macOS Keychain entry `Claude Code-credentials`, then `~/.claude/.credentials.json`. It goes only to `api.anthropic.com` and is never written anywhere. The `openrouter` provider sends `OPENROUTER_API_KEY` only to `openrouter.ai` (`GET /api/v1/key`) and reads no other credential files. Tokens and keys reach `curl` on stdin (`-K -`), never on its command line, where any local process could read them.
 - **Files.** Cache, flags, logs and config go to `~/.local/state/continuum` (see [Configuration](#configuration)). The CLI installer puts the code in `~/.continuum` and a symlink to it on your `PATH`. `continuum doctor` reads `~/.claude/settings.json`, the plugin cache and `~/.junie/extensions` to report; only `doctor --fix` writes, and only the status line copy in `~/.claude/hooks/` and the root pointer in the state directory.
 - **Notifications.** A desktop notification (`osascript` / `notify-send`, or your `CONTINUUM_NOTIFY_CMD`) when a resume run ends and when the limit runs out mid-turn. The text goes to `osascript` as arguments, never as script.
@@ -83,7 +85,7 @@ continuum history     # last 20 snapshots taken by `continuum status`
 continuum cleanup     # remove stale flag/cache files (>24h old)
 continuum doctor      # why no warning: provider, plugin enabled, old hooks, stale copies (--fix: safe fixes)
 continuum install --agent codex   # wire an adapter into the agent's config (codex|gemini|cursor|opencode; --dry-run)
-continuum providers   # anthropic, mock, spend
+continuum providers   # anthropic, mock, openrouter, spend
 continuum check       # prints a warning when a new tier is crossed, else nothing
 continuum statusline  # show status-line format config
 
@@ -145,6 +147,8 @@ agent event ──► adapters/<agent>/ ──► continuum check ──► prov
 | Fallback | `nohup sleep` | no | best available |
 
 The log is `continuum-resume.log` in the state directory, with markers `### resumed in DIR` and `### end (exit N)`. A desktop notification (`osascript` / `notify-send`) comes when the run ends.
+
+When the limit runs out in the middle of a turn (Claude Code and Junie report it as `StopFailure`), nothing can be asked any more: continuum notifies you and leaves a note for the next session start. With `CONTINUUM_RESUME_ON_LIMIT=1` it also schedules the resume for the reset, if that is within a day.
 
 Inside a [bb](#bb) thread the resumed run is not a separate headless session: the task goes back into the same thread with `bb thread tell`.
 

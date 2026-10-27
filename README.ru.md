@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.7.4-brightgreen.svg" alt="version: 0.7.0"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.8.0-brightgreen.svg" alt="version: 0.8.0"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -24,7 +24,9 @@
 
 - **Предупреждения на 80 / 90 / 95 / 99 %:** агент останавливается и спрашивает тебя, что делать. Сам он не решает.
 - **Авто-продолжение:** планирует запуск агента сразу после сброса, не даёт машине заснуть и уведомляет, когда закончит.
+- **Лимит кончился посреди хода:** уведомление и заметка для следующей сессии, а если ты согласился заранее (`CONTINUUM_RESUME_ON_LIMIT=1`), — запланированный resume на сброс.
 - **Статус-бар:** текущее использование обоих окон — в агентах, у которых есть статусная строка.
+- **`continuum doctor`:** объясняет, почему предупреждение не сработало (плагин выключен, старые хуки, устаревшие копии).
 
 Ядро не знает, какой агент его вызвал и откуда берутся цифры: агенты подключаются через тонкие [адаптеры](#агенты), бюджеты — через [провайдеры](#провайдеры). POSIX `sh` и `curl`, без зависимостей. macOS, Linux, BSD, Windows.
 
@@ -42,13 +44,13 @@ irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | 
 
 Скрипты установки короткие, их можно прочитать заранее: [install.sh](install.sh) / [install.ps1](install.ps1).
 
-**2. Адаптер твоего агента** — для предупреждений внутри сессии. Какие есть — в разделе [Агенты](#агенты). Агент без адаптера может вызывать `continuum check` из своего хука, или можно держать `continuum watch` в отдельной панели.
+**2. Адаптер твоего агента** — для предупреждений внутри сессии. Какие есть — в разделе [Агенты](#агенты); `continuum install --agent codex|gemini|cursor|opencode` сам подключит адаптер в конфиг агента. Агент без адаптера может вызывать `continuum check` из своего хука, или можно держать `continuum watch` в отдельной панели.
 
 ## Что он трогает
 
 Что ядро читает, отправляет, пишет и запускает. Каждый адаптер добавляет свой список — в своём разделе ниже.
 
-- **Сеть.** В сеть ходит только провайдер. Провайдер по умолчанию, `anthropic`, делает один `GET https://api.anthropic.com/api/oauth/usage` с OAuth-токеном в заголовке `Authorization`. Это **недокументированный эндпоинт**, не публичный API, и он может измениться. Ответ кэшируется на 10 минут. Необязательный провайдер `spend` обращается к `https://api.anthropic.com/v1/billing/usage` с `ANTHROPIC_ADMIN_KEY`. Больше ничего с машины не уходит.
+- **Сеть.** В сеть ходит только провайдер. Провайдер по умолчанию, `anthropic`, делает один `GET https://api.anthropic.com/api/oauth/usage` с OAuth-токеном в заголовке `Authorization`. Это **недокументированный эндпоинт**, не публичный API, и он может измениться. Ответ кэшируется на 10 минут. Необязательный провайдер `spend` обращается к `https://api.anthropic.com/v1/billing/usage` с `ANTHROPIC_ADMIN_KEY`, необязательный провайдер `openrouter` — `GET https://openrouter.ai/api/v1/key` с `OPENROUTER_API_KEY`. `watch --ide` обращается только к IDE на `127.0.0.1`. Больше ничего с машины не уходит.
 - **Учётные данные.** Провайдер `anthropic` ищет токен в таком порядке: `$CLAUDE_CODE_OAUTH_TOKEN`, запись `Claude Code-credentials` в Keychain macOS, затем `~/.claude/.credentials.json`. Он уходит только на `api.anthropic.com` и нигде не сохраняется. Провайдер `openrouter` отправляет `OPENROUTER_API_KEY` только на `openrouter.ai` (`GET /api/v1/key`) и не читает других файлов с учётными данными. Токены и ключи передаются `curl` через stdin (`-K -`), а не в командной строке, которую видит любой локальный процесс.
 - **Файлы.** Кэш, флаги, логи и конфиг лежат в `~/.local/state/continuum` (см. [Настройка](#настройка)). CLI-инсталлятор кладёт код в `~/.continuum`, а символическую ссылку на него — в каталог из `PATH`. `continuum doctor` читает `~/.claude/settings.json`, кэш плагина и `~/.junie/extensions` только для отчёта; пишет лишь `doctor --fix`, и только копию статус-бара в `~/.claude/hooks/` и указатель на код в каталоге состояния.
 - **Уведомления.** Уведомление на рабочий стол (`osascript` / `notify-send` или твой `CONTINUUM_NOTIFY_CMD`), когда запуск resume закончился и когда лимит кончился посреди хода. Текст уходит в `osascript` аргументами, а не как скрипт.
@@ -83,7 +85,7 @@ continuum history     # последние 20 снимков, сделанных
 continuum cleanup     # удалить устаревшие файлы флагов и кэша (>24ч)
 continuum doctor      # почему нет предупреждения: провайдер, плагин, старые хуки, устаревшие копии (--fix: безопасные правки)
 continuum install --agent codex   # подключить адаптер в конфиг агента (codex|gemini|cursor|opencode; --dry-run)
-continuum providers   # anthropic, mock, spend
+continuum providers   # anthropic, mock, openrouter, spend
 continuum check       # печатает предупреждение при пересечении новой ступени, иначе ничего
 continuum statusline  # показать конфиг статус-бара
 
@@ -145,6 +147,8 @@ CONTINUUM_RESUME_CMD='myagent run "{prompt}"' continuum resume 21:41 "$PWD" "fin
 | Fallback | `nohup sleep` | нет | лучший доступный |
 
 Лог — `continuum-resume.log` в каталоге состояния, с маркерами `### resumed in DIR` и `### end (exit N)`. Когда запуск заканчивается, приходит уведомление на рабочий стол (`osascript` / `notify-send`).
+
+Если лимит кончился посреди хода (Claude Code и Junie сообщают об этом событием `StopFailure`), спросить уже нельзя: continuum уведомит тебя и оставит заметку к следующему старту сессии. С `CONTINUUM_RESUME_ON_LIMIT=1` он ещё и запланирует resume на сброс, если тот в пределах суток.
 
 Внутри треда [bb](#bb) возобновление — не отдельная headless-сессия: задача уходит обратно в тот же тред через `bb thread tell`.
 
