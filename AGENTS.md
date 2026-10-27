@@ -98,7 +98,7 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
 1. **R7 — глубже в bb** (`…/2026-10-27-r7-bb-integration.md`, draft): провайдер `bb` из RPC `provider-usage.v1` самого bb (впервые окно Codex, без недокументированного эндпоинта Anthropic); без двойного resume рядом со встроенным `provider-retry` bb; предупреждения в Codex/pi/ACP-тредах (если у bb есть хук конца хода для плагинов); живая проверка.
 2. **R2 — живые проверки**: bb-тред (нужен свободный лимит Claude), opencode (нужна платная модель — с согласия), Junie TUI; Codex/Gemini/Cursor не установлены.
 3. **R1.1 — чат JetBrains**: матрица Claude Agent / Codex в чате RustRover (нужен открытый RustRover + лимит Claude).
-4. Беклог-«Later»: `resume` по дате (недельный сброс через несколько дней), `continuum cleanup` от `.DS_Store`, удаление форвардеров `hooks/*.sh|ps1` (отдельная спека к v0.9), CI-предупреждения анализатора (стилистика — намеренно).
+4. **R8 — мелочи** (`…/2026-10-27-r8-small-fixes.md`, draft): `resume` на дату (недельный сброс), `spend` без фальшивого 0, честное «Sleep inhibited», удаление форвардеров `hooks/*.sh|ps1` (в два релиза), проверка `.DS_Store`, настройки PSScriptAnalyzer, uninstall с сохранением правок пользователя.
 
 ## Feedback от агентов (обязательно)
 
