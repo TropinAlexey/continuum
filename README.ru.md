@@ -49,7 +49,7 @@ irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | 
 Что ядро читает, отправляет, пишет и запускает. Каждый адаптер добавляет свой список — в своём разделе ниже.
 
 - **Сеть.** В сеть ходит только провайдер. Провайдер по умолчанию, `anthropic`, делает один `GET https://api.anthropic.com/api/oauth/usage` с OAuth-токеном в заголовке `Authorization`. Это **недокументированный эндпоинт**, не публичный API, и он может измениться. Ответ кэшируется на 10 минут. Необязательный провайдер `spend` обращается к `https://api.anthropic.com/v1/billing/usage` с `ANTHROPIC_ADMIN_KEY`. Больше ничего с машины не уходит.
-- **Учётные данные.** Провайдер `anthropic` ищет токен в таком порядке: `$CLAUDE_CODE_OAUTH_TOKEN`, запись `Claude Code-credentials` в Keychain macOS, затем `~/.claude/.credentials.json`. Он уходит только на `api.anthropic.com` и нигде не сохраняется. Провайдер `openrouter` отправляет `OPENROUTER_API_KEY` только на `openrouter.ai` (`GET /api/v1/key`) и не читает других файлов с учётными данными.
+- **Учётные данные.** Провайдер `anthropic` ищет токен в таком порядке: `$CLAUDE_CODE_OAUTH_TOKEN`, запись `Claude Code-credentials` в Keychain macOS, затем `~/.claude/.credentials.json`. Он уходит только на `api.anthropic.com` и нигде не сохраняется. Провайдер `openrouter` отправляет `OPENROUTER_API_KEY` только на `openrouter.ai` (`GET /api/v1/key`) и не читает других файлов с учётными данными. Токены и ключи передаются `curl` через stdin (`-K -`), а не в командной строке, которую видит любой локальный процесс.
 - **Файлы.** Кэш, флаги, логи и конфиг лежат в `~/.local/state/continuum` (см. [Настройка](#настройка)). CLI-инсталлятор кладёт код в `~/.continuum`, а символическую ссылку на него — в каталог из `PATH`. `continuum doctor` читает `~/.claude/settings.json`, кэш плагина и `~/.junie/extensions` только для отчёта; пишет лишь `doctor --fix`, и только копию статус-бара в `~/.claude/hooks/` и указатель на код в каталоге состояния.
 - **Уведомления.** Уведомление на рабочий стол (`osascript` / `notify-send` или твой `CONTINUUM_NOTIFY_CMD`), когда запуск resume закончился и когда лимит кончился посреди хода. Текст уходит в `osascript` аргументами, а не как скрипт.
 - **Конфиги агентов (только `continuum install --agent <x>`).** Пишет хуки адаптера в `~/.codex/hooks.json`, `~/.gemini/settings.json` или `~/.cursor/hooks.json` (сначала копия `<файл>.continuum-bak`; файл, где уже есть `"hooks"`, не трогает) или ставит симлинк плагина opencode в `~/.config/opencode/plugins/`. `continuum uninstall --agent <x>` откатывает, пока файл не менялся.
@@ -301,7 +301,7 @@ bb — десктоп-приложение, которое запускает а
 ## Участие
 
 ```
-sh tests/run.sh          # 250 тестов, mock-провайдер, без сети (проходит и под dash)
+sh tests/run.sh          # 253 теста, mock-провайдер, без сети (проходит и под dash)
 pwsh tests/run.ps1       # 196 тестов, та же сюита для PowerShell
 ```
 

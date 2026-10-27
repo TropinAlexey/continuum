@@ -218,6 +218,14 @@ cnt_num() {
     printf '%s' "$v"
 }
 
+# cnt_curl_secret "Header: value" <curl args...> - curl with one secret header given on
+# stdin as a curl config (-K -), never in argv: argv is visible to every local process
+# (ps, /proc/<pid>/cmdline). printf is a builtin, so the secret never appears there either.
+cnt_curl_secret() {
+    _hdr=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'); shift
+    printf 'header = "%s"\n' "$_hdr" | curl -K - "$@"
+}
+
 # cnt_notify "title" "message" - desktop notification, best-effort, never fails.
 # The text goes to osascript as argv, never into the AppleScript source: a project
 # name with a quote in it must not become code. CONTINUUM_NOTIFY_CMD replaces the

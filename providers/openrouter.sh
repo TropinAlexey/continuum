@@ -19,7 +19,7 @@ KEY="${OPENROUTER_API_KEY:-}"
 BASE="${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}"
 case "$BASE" in https://*|file://*) ;; *) echo "OPENROUTER_API_BASE must be https:// or file://" >&2; exit 1 ;; esac
 
-json=$(curl -fsS -m 15 -H "Authorization: Bearer $KEY" "$BASE/key" 2>/dev/null) || {
+json=$(cnt_curl_secret "Authorization: Bearer $KEY" -fsS -m 15 "$BASE/key" 2>/dev/null) || {
     echo "openrouter: /key unavailable (offline, or the key is invalid)" >&2; exit 1
 }
 

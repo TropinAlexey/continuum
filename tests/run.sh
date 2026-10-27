@@ -397,6 +397,21 @@ out=$(OPENROUTER_API_BASE=http://example.com sh "$ROOT/providers/openrouter.sh" 
 out=$(OPENROUTER_API_KEY=k OPENROUTER_API_BASE=http://example.com sh "$ROOT/providers/openrouter.sh" 2>&1) && bad "openrouter refuses a non-https base" "$out" || check "openrouter refuses a non-https base" "must be https://" "$out"
 check "openrouter feeds continuum status" "resets at" "$(OPENROUTER_API_KEY=k OPENROUTER_API_BASE="file://$orr/m" CONTINUUM_PROVIDER=openrouter CONTINUUM_STATE_DIR="$orr/st" sh "$ROOT/bin/continuum" status 2>&1)"
 
+echo "provider secrets stay out of argv:"
+# A fake curl records its argv and stdin: the secret must be in stdin (-K -), never in argv.
+fc="$TMP/fakecurl"; mkdir -p "$fc"
+printf '#!/bin/sh\nprintf "%%s\\n" "$@" > "%s/argv"\ncat > "%s/stdin"\nexit 22\n' "$fc" "$fc" > "$fc/curl"; chmod +x "$fc/curl"
+for pv in openrouter anthropic spend; do
+    rm -f "$fc/argv" "$fc/stdin"
+    PATH="$fc:$PATH" OPENROUTER_API_KEY=S3CRET-or CLAUDE_CODE_OAUTH_TOKEN=S3CRET-an ANTHROPIC_ADMIN_KEY=S3CRET-sp \
+        sh "$ROOT/providers/$pv.sh" >/dev/null 2>&1 </dev/null || true
+    if [ -f "$fc/argv" ] && ! grep -q S3CRET "$fc/argv" && grep -q 'header = ".*S3CRET' "$fc/stdin" 2>/dev/null; then
+        ok "$pv: secret header via stdin, not argv"
+    else
+        bad "$pv: secret header via stdin, not argv" "argv: $(tr '\n' ' ' < "$fc/argv" 2>/dev/null)"
+    fi
+done
+
 echo "install --agent:"
 ih="$TMP/ih"; mkdir -p "$ih"
 ci() { HOME="$ih" CONTINUUM_STATE_DIR="$ih/st" XDG_CONFIG_HOME="$ih/.config" CODEX_HOME="$ih/.codex" sh "$ROOT/bin/continuum" "$@" 2>&1; }

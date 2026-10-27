@@ -33,8 +33,7 @@ last_day=$(date -u -d "$year-$month-01 +1 month -1 day" +%d 2>/dev/null \
     || printf '28')
 case "$last_day" in ''|*[!0-9]*) last_day=28 ;; esac
 
-json=$(curl -fsS -m 15 \
-    -H "x-api-key: $ADMIN_KEY" \
+json=$(cnt_curl_secret "x-api-key: $ADMIN_KEY" -fsS -m 15 \
     -H "anthropic-version: 2023-06-01" \
     "https://api.anthropic.com/v1/billing/usage?start_date=${year}-${month}-01&end_date=${year}-${month}-${last_day}" 2>/dev/null) || {
     echo "billing endpoint unavailable (check ANTHROPIC_ADMIN_KEY)" >&2; exit 1

@@ -45,7 +45,7 @@ tok=$(_token) || { echo "no OAuth token found - are you logged in to Claude Code
 # An empty Bearer would just 401 below - fail fast with the helpful message.
 [ -n "$tok" ] || { echo "no OAuth token found - are you logged in to Claude Code?" >&2; exit 1; }
 
-json=$(curl -fsS -m 15 -H "Authorization: Bearer $tok" \
+json=$(cnt_curl_secret "Authorization: Bearer $tok" -fsS -m 15 \
             -H "anthropic-beta: oauth-2025-04-20" "$USAGE_URL" 2>/dev/null) || {
     echo "usage endpoint unavailable (rate limited, offline, or token expired)" >&2; exit 1
 }
