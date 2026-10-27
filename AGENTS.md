@@ -93,19 +93,12 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
 
 ## Дальше (беклог, по приоритету)
 
-Порядок и требования — `docs/superpowers/specs/2026-10-26-roadmap.md` (R4 StopFailure + resume по согласию заранее → R3 doctor → R2 живые проверки → R1 JetBrains-чат → R5 install → R6 провайдер). Каждый пункт — своя спека до кода.
+Требования и статусы — `docs/superpowers/specs/2026-10-26-roadmap.md`; каждый пункт — своя спека до кода. Сделано: R4 (v0.7.3), R3 (v0.7.4), R5 + R6 + R1.3 (v0.8.0).
 
-0. **Из feedback 2026-10-23 (лимит внутри хода, `feedback/2026-10-23-claude-limit-{mid-turn,long-turn}.md`, два случая подряд)**:
-   - ~~Проверка порога внутри хода~~ — сделано 2026-10-23 (`tool-check.sh`, PostToolUse). Не сделано: отдельный жёсткий блок `Agent` выше порога — посмотреть по отзывам, хватает ли мягкого предупреждения.
-   - **`continuum doctor`**: подключённый коммит, включён ли плагин (`enabledPlugins`), legacy-хуки (`token-budget-check.sh`, `~/.claude/lib/usage.sh`), дрейф копии statusline + одна команда миграции. Связано с п.4.
-   - **Auto-resume по 429 внутри хода**: у Claude Code есть событие `StopFailure` (matcher `rate_limit`), без decision control — спросить пользователя нельзя. Вариант: по нему писать заметку/уведомление «лимит, сброс в HH:MM, `continuum resume …`», а не планировать молча (resume без согласия нарушает принцип «не решать за пользователя»).
-   - ~~Мусор `*.tmp`~~ — сделано в v0.7.2.
-1. **Живая проверка новых адаптеров** (Codex, Gemini, Cursor, opencode): по одной сессии с `CONTINUUM_THRESHOLD=10 CONTINUUM_TIERS=10` + mock-провайдер; по итогам — строка «run live» в README/harnesses. Отдельно: есть ли у агентов инструмент вопроса (тогда строка в `cnt_ask_hint`).
-2. ~~Адаптеры Codex / opencode / Cursor / Gemini~~ — сделано 2026-10-24, v0.7.0.
-3. —
-4. **`continuum install --agent <x>`** + доки (подпроект 5); заодно проверить marketplace-установку с нуля.
-5. **Новый провайдер** — OpenAI или Gemini по `docs/writing-a-provider.md` (отдельная ось от агентов).
-6. Мелочи: `continuum cleanup` от `.DS_Store`-мусора? ~~30-сек гейт на bfs, checkout@v4~~ — сделано в v0.7.2. PSScriptAnalyzer из PSGallery иногда не ставится.
+1. **R7 — глубже в bb** (`…/2026-10-27-r7-bb-integration.md`, draft): провайдер `bb` из RPC `provider-usage.v1` самого bb (впервые окно Codex, без недокументированного эндпоинта Anthropic); без двойного resume рядом со встроенным `provider-retry` bb; предупреждения в Codex/pi/ACP-тредах (если у bb есть хук конца хода для плагинов); живая проверка.
+2. **R2 — живые проверки**: bb-тред (нужен свободный лимит Claude), opencode (нужна платная модель — с согласия), Junie TUI; Codex/Gemini/Cursor не установлены.
+3. **R1.1 — чат JetBrains**: матрица Claude Agent / Codex в чате RustRover (нужен открытый RustRover + лимит Claude).
+4. Беклог-«Later»: `resume` по дате (недельный сброс через несколько дней), `continuum cleanup` от `.DS_Store`, удаление форвардеров `hooks/*.sh|ps1` (отдельная спека к v0.9), CI-предупреждения анализатора (стилистика — намеренно).
 
 ## Feedback от агентов (обязательно)
 
