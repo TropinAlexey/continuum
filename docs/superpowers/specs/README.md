@@ -28,9 +28,11 @@ folder, and code review checks the change against it.
    A finding that is right but out of scope goes to the spec's "Later" list, not silently
    dropped. If the work changed a decision, update the spec in the same commit; the spec
    stays the description of what the code does.
-6. **Ship.** Tests green in both suites, `claude plugin validate .`, push, green CI, then the
-   release (tag, GitHub Release, both READMEs rewritten). Set the spec's status to `done`
-   with the version.
+6. **Ship.** Tests green in both suites, `claude plugin validate .`, local commit with the
+   `Spec:` trailer. **Version bump and push only on the user's explicit command** (and with
+   them the tag, the GitHub Release and the README rewrite): a finished spec does not imply
+   either. On that command: bump, push, green CI, tag + Release, both READMEs; set the spec's
+   status to `done` with the version.
 
 Small things (typo, one-line fix, docs-only) skip the spec; say so in the commit message.
 
