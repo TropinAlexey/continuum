@@ -380,6 +380,47 @@ cmp -s "$dr/claude/settings.json" "$dr/settings.before" && ok "doctor --fix neve
 rm -rf "$dr/junie/extensions"
 check "doctor: no Junie extension is a skip" "skip Junie" "$(doc)"
 
+echo "install --agent:"
+ih="$TMP/ih"; mkdir -p "$ih"
+ci() { HOME="$ih" CONTINUUM_STATE_DIR="$ih/st" XDG_CONFIG_HOME="$ih/.config" CODEX_HOME="$ih/.codex" sh "$ROOT/bin/continuum" "$@" 2>&1; }
+json_ok() { if command -v python3 >/dev/null 2>&1; then python3 -m json.tool "$1" >/dev/null 2>&1; else grep -q '"hooks"' "$1"; fi; }
+out=$(ci install --agent codex)
+check "install creates the codex hooks file" "installed: $ih/.codex/hooks.json" "$out"
+json_ok "$ih/.codex/hooks.json" && ok "install writes valid JSON (created)" || bad "install writes valid JSON (created)" "$(cat "$ih/.codex/hooks.json")"
+check "install points at this code" "$ROOT/adapters/codex/stop.sh" "$(cat "$ih/.codex/hooks.json")"
+check "install twice changes nothing" "already installed" "$(ci install --agent codex)"
+mkdir -p "$ih/.gemini"; printf '{\n  "theme": "dark"\n}\n' > "$ih/.gemini/settings.json"; cp "$ih/.gemini/settings.json" "$ih/gemini.orig"
+ci install --agent gemini >/dev/null
+json_ok "$ih/.gemini/settings.json" && ok "install merges into a file without hooks" || bad "install merges into a file without hooks" "$(cat "$ih/.gemini/settings.json")"
+check "install keeps the other settings" '"theme": "dark"' "$(cat "$ih/.gemini/settings.json")"
+[ -f "$ih/.gemini/settings.json.continuum-bak" ] && ok "install backs the file up first" || bad "install backs the file up first" "no backup"
+ci uninstall --agent gemini >/dev/null
+cmp -s "$ih/.gemini/settings.json" "$ih/gemini.orig" && ok "uninstall restores the file exactly" || bad "uninstall restores the file exactly" "$(cat "$ih/.gemini/settings.json")"
+mkdir -p "$ih/.cursor"; printf '{"version":1,"hooks":{"stop":[]}}\n' > "$ih/.cursor/hooks.json"; cp "$ih/.cursor/hooks.json" "$ih/cursor.orig"
+out=$(ci install --agent cursor) && rc=0 || rc=$?
+check "install refuses existing hooks" 'already has "hooks"; merge these entries by hand' "$out"
+cmp -s "$ih/.cursor/hooks.json" "$ih/cursor.orig" && [ "$rc" = 1 ] && ok "a refused install leaves the file alone" || bad "a refused install leaves the file alone" "rc=$rc"
+printf 'not json\n' > "$ih/.cursor/hooks.json"
+out=$(ci install --agent cursor) || true
+check "install refuses a file it cannot parse" "does not start with '{'" "$out"
+out=$(ci install --agent codex --dry-run)
+check "dry run of an installed agent" "already installed" "$out"
+ci uninstall --agent codex >/dev/null
+[ ! -f "$ih/.codex/hooks.json" ] && ok "uninstall removes a file it created" || bad "uninstall removes a file it created" "still there"
+out=$(ci install --agent codex --dry-run)
+check "dry run prints the change" "would write $ih/.codex/hooks.json" "$out"
+[ ! -f "$ih/.codex/hooks.json" ] && ok "dry run writes nothing" || bad "dry run writes nothing" "written"
+ci install --agent codex >/dev/null; printf ' ' >> "$ih/.codex/hooks.json"
+out=$(ci uninstall --agent codex) || true
+check "uninstall refuses a file changed since install" "changed since install" "$out"
+check "install opencode links the plugin" "linked $ih/.config/opencode/plugins/continuum.js" "$(ci install --agent opencode)"
+check "uninstall opencode removes only its link" "removed" "$(ci uninstall --agent opencode)"
+printf '{}' > "$ih/real.json"; rm -f "$ih/.cursor/hooks.json"; ln -s "$ih/real.json" "$ih/.cursor/hooks.json"
+out=$(ci install --agent cursor) || true
+check "install refuses a symlinked config" "is a symlink" "$out"
+[ -L "$ih/.cursor/hooks.json" ] && ok "the symlink stays a symlink" || bad "the symlink stays a symlink" "replaced"
+check "claude installs as a plugin" "claude plugin install continuum@continuum" "$(ci install --agent claude)"
+
 echo "watch --ide (JetBrains MCP):"
 # The transport is a stub that records each JSON-RPC call and answers like the IDE.
 ide_stub="$TMP/ide_stub.sh"

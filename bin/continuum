@@ -17,6 +17,8 @@
 #   continuum history           show recent usage snapshots
 #   continuum cleanup           remove stale flag/cache files (>24h old)
 #   continuum doctor [--fix]    why the warning does not fire: plugin, old hooks, copies
+#   continuum install|uninstall --agent codex|gemini|cursor|opencode [--dry-run]
+#                               wire an adapter into the agent's own config
 #   continuum statusline [key value | reset]
 #                               show or configure status-line format
 #
@@ -768,6 +770,105 @@ cmd_doctor() {
     [ "$fails" -eq 0 ]
 }
 
+# `continuum install --agent <x> [--dry-run]` / `uninstall --agent <x>` (R5): wire an
+# adapter into an agent's own config. No JSON parser, so only shapes we can edit safely:
+# no file -> create it; a file without "hooks" -> insert the block (backup first); hooks
+# already there -> refuse and print the snippet. Uninstall undoes it only while the file
+# is unchanged since install; otherwise it prints the manual step. Never half-writes.
+inst_file() {
+    case "$1" in
+        codex)  printf '%s' "${CODEX_HOME:-$HOME/.codex}/hooks.json" ;;
+        gemini) printf '%s' "$HOME/.gemini/settings.json" ;;
+        cursor) printf '%s' "$HOME/.cursor/hooks.json" ;;
+        opencode) printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/plugins/continuum.js" ;;
+    esac
+}
+inst_hooks() { # the "hooks" member for agent $1, code at $2
+    case "$1" in
+        codex)  printf '  "hooks": {\n    "Stop": [{ "hooks": [{ "type": "command", "command": "sh \\"%s/adapters/codex/stop.sh\\"" }] }],\n    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "sh \\"%s/adapters/codex/tool-check.sh\\"" }] }]\n  }' "$2" "$2" ;;
+        gemini) printf '  "hooks": {\n    "AfterAgent": [{ "hooks": [{ "type": "command", "command": "sh \\"%s/adapters/gemini/after-agent.sh\\"" }] }],\n    "AfterTool": [{ "matcher": ".*", "hooks": [{ "type": "command", "command": "sh \\"%s/adapters/gemini/after-tool.sh\\"" }] }]\n  }' "$2" "$2" ;;
+        cursor) printf '  "version": 1,\n  "hooks": {\n    "stop": [{ "command": "sh \\"%s/adapters/cursor/stop.sh\\"" }],\n    "postToolUse": [{ "command": "sh \\"%s/adapters/cursor/tool-check.sh\\"" }]\n  }' "$2" "$2" ;;
+    esac
+}
+
+cmd_install() {
+    action="$1"; shift
+    agent=""; dry=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --agent) agent="${2:-}"; shift 2 || shift ;;
+            --dry-run) dry=1; shift ;;
+            *) echo "continuum $action: unknown argument '$1'" >&2; exit 1 ;;
+        esac
+    done
+    case "$agent" in
+        claude) echo "Claude Code installs continuum as a plugin: claude plugin install continuum@continuum (or /plugin in a session). See README → Claude Code."; return 0 ;;
+        junie)  echo "Junie installs continuum as an extension: in Junie, /extensions → add the marketplace https://github.com/TropinAlexey/continuum → install continuum."; return 0 ;;
+        codex|gemini|cursor|opencode) ;;
+        *) echo "continuum $action: --agent codex|gemini|cursor|opencode (claude and junie install as plugins)" >&2; exit 1 ;;
+    esac
+    # The code path lands inside a shell command in the agent's config: allow only
+    # characters that need no quoting, so no path can turn into shell syntax.
+    root=$CNT_ROOT
+    case "$root" in *[!A-Za-z0-9/._+@~-]*) echo "continuum $action: the code path '$root' has characters that are unsafe in a hook command; install continuum to a plain path (e.g. ~/.continuum)" >&2; exit 1 ;; esac
+    f=$(inst_file "$agent"); rec="$CNT_STATE/.continuum-install-$agent"
+    mkdir -p "$CNT_STATE" 2>/dev/null || true
+
+    if [ "$agent" = opencode ]; then
+        src="$root/adapters/opencode/continuum.js"
+        if [ "$action" = install ]; then
+            if [ -L "$f" ] && [ "$(readlink "$f")" = "$src" ]; then echo "already installed: $f"; return 0; fi
+            [ -e "$f" ] || [ -L "$f" ] && { echo "continuum install: $f exists and is not ours; remove it, then: ln -s '$src' '$f'" >&2; exit 1; }
+            [ -n "$dry" ] && { echo "would link $f -> $src"; return 0; }
+            mkdir -p "$(dirname "$f")" && ln -s "$src" "$f" && echo "linked $f -> $src (restart opencode)"
+        else
+            if [ -L "$f" ] && [ "$(readlink "$f")" = "$src" ]; then
+                [ -n "$dry" ] && { echo "would remove $f"; return 0; }
+                rm -f "$f" && echo "removed $f"
+            else echo "nothing to uninstall: $f is not continuum's link"; fi
+        fi
+        return 0
+    fi
+
+    # A symlinked config (dotfiles) would be replaced by a plain file on mv: leave it alone.
+    [ -L "$f" ] && { echo "continuum $action: $f is a symlink (dotfiles?); edit the file it points to by hand" >&2; exit 1; }
+    block=$(inst_hooks "$agent" "$root")
+    if [ "$action" = install ]; then
+        if [ -f "$f" ] && grep -q "/adapters/$agent/" "$f"; then echo "already installed: $f"; return 0; fi
+        if [ ! -f "$f" ] || [ -z "$(tr -d ' \t\r\n{}' < "$f")" ]; then
+            mode=created; new=$(printf '{\n%s\n}\n' "$block")
+        elif grep -q '"hooks"[[:space:]]*:' "$f"; then
+            printf 'continuum install: %s already has "hooks"; merge these entries by hand:\n%s\n' "$f" "$block" >&2; exit 1
+        elif [ "$(sed -n '/[^[:space:]]/{p;q;}' "$f" | cut -c1)" != "{" ]; then
+            echo "continuum install: $f does not start with '{'; not touching it" >&2; exit 1
+        else
+            mode=inserted
+            new=$(CNT_B="$block" awk 'done == 0 && index($0, "{") { i = index($0, "{"); print substr($0, 1, i); print ENVIRON["CNT_B"] ","; rest = substr($0, i + 1); if (rest ~ /[^[:space:]]/) print rest; done = 1; next } { print }' "$f") || new=""
+        fi
+        # Never write a config we did not build in full.
+        case "$new" in *'"hooks"'*) ;; *) echo "continuum install: could not build the new $f; not touching it" >&2; exit 1 ;; esac
+        if [ -n "$dry" ]; then printf 'would write %s:\n%s\n' "$f" "$new"; return 0; fi
+        mkdir -p "$(dirname "$f")" || exit 1
+        [ "$mode" = inserted ] && { cp "$f" "$f.continuum-bak" || exit 1; }
+        [ -f "$f" ] && [ "$mode" = created ] && cp "$f" "$f.continuum-bak"
+        printf '%s\n' "$new" > "$f.continuum-tmp" && mv "$f.continuum-tmp" "$f" || { rm -f "$f.continuum-tmp"; exit 1; }
+        { printf '%s\n' "$mode"; cksum < "$f"; } > "$rec"
+        if [ -f "$f.continuum-bak" ]; then echo "installed: $f (backup: $f.continuum-bak)"; else echo "installed: $f"; fi
+        [ "$agent" = codex ] && echo "Codex runs hooks only once trusted: approve them in /hooks."
+        return 0
+    fi
+    # uninstall
+    [ -f "$rec" ] || { echo "nothing to uninstall: continuum did not install into $f"; return 0; }
+    mode=$(sed -n 1p "$rec"); sum=$(sed -n 2p "$rec")
+    if [ ! -f "$f" ]; then rm -f "$rec"; echo "already gone: $f"; return 0; fi
+    if [ "$(cksum < "$f")" != "$sum" ]; then
+        printf 'continuum uninstall: %s changed since install; remove the hooks that point to %s/adapters/%s/ by hand\n' "$f" "$root" "$agent" >&2; exit 1
+    fi
+    [ -n "$dry" ] && { echo "would restore $f ($mode)"; return 0; }
+    if [ -f "$f.continuum-bak" ]; then mv "$f.continuum-bak" "$f"; else rm -f "$f"; fi
+    rm -f "$rec"; echo "uninstalled: $f"
+}
+
 cmd_cleanup() {
     cleaned=0
     for f in "$CNT_STATE"/.continuum-warned-* "$CNT_STATE"/.continuum-warned7d-* "$CNT_STATE"/.continuum-cache-* "$CNT_STATE"/.continuum-wakelock-* "$CNT_STATE"/.continuum-limit-*; do
@@ -792,6 +893,8 @@ case "${1:-}" in
     estimate)   cmd_estimate ;;
     history)    cmd_history ;;
     cleanup)    cmd_cleanup ;;
+    install)    shift; cmd_install install "$@" ;;
+    uninstall)  shift; cmd_install uninstall "$@" ;;
     doctor)     shift; cmd_doctor "$@" || exit 1 ;;
     statusline) shift; cmd_statusline "$@" ;;
     -h|--help)  usage ;;

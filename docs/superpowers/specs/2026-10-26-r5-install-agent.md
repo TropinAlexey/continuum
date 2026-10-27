@@ -1,6 +1,6 @@
 # R5. `continuum install --agent <x>`
 
-Status: agreed
+Status: done (local, not released)
 Date: 2026-10-26
 Roadmap: [2026-10-26-roadmap.md](2026-10-26-roadmap.md)
 
@@ -34,6 +34,16 @@ steps and change nothing.
 Merge by marker: each inserted hook command contains `continuum`; uninstall removes entries
 whose command points into the continuum root. JSON edits with awk on known shapes; anything
 unexpected → refuse with the manual steps (never half-write a config).
+
+Implemented: `continuum install|uninstall --agent <x> [--dry-run]` (sh + ps1). Modes: no file
+→ created; file without `"hooks"` → block inserted after the first `{` (backup first); file
+with `"hooks"` or not starting with `{` → refused with the snippet. Uninstall restores the
+backup (or removes a created file) only while the file's checksum matches the one recorded
+at install; otherwise it prints the manual step (R5.2 holds for unchanged files). The code
+path must be plain (`[A-Za-z0-9/._+@~-]`), since it lands in a shell command. ps1 on Windows
+writes `pwsh -NoProfile -File …ps1` commands. R5.6: marketplace install of v0.7.4 from a
+clean HOME with the `claude plugin` CLI works, `continuum doctor` all ok there (2026-10-27);
+Junie `/extensions` is interactive, not run.
 
 ## Acceptance
 

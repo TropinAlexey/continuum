@@ -444,6 +444,48 @@ if ($script:docRc -eq 1) { Ok "doctor: a fail exits 1" } else { Bad "doctor: a f
 if ((Get-Content -Raw (Join-Path $dr 'claude/settings.json')) -eq $before) { Ok "doctor --fix never edits settings.json" } else { Bad "doctor --fix never edits settings.json" "changed" }
 $env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
 
+Write-Host "install --agent:"
+$ih = Join-Path $tmp 'ih'; New-Item -ItemType Directory -Force -Path $ih | Out-Null
+function Ci {
+    $saveHome = $env:HOME
+    $env:HOME = $ih; $env:CONTINUUM_STATE_DIR = Join-Path $ih 'st'; $env:XDG_CONFIG_HOME = Join-Path $ih '.config'; $env:CODEX_HOME = Join-Path $ih '.codex'
+    $o = & pwsh -NoProfile -File (Join-Path $root 'bin/continuum.ps1') @args 2>&1
+    $script:ciRc = $LASTEXITCODE
+    $env:HOME = $saveHome; Remove-Item Env:XDG_CONFIG_HOME, Env:CODEX_HOME -ErrorAction SilentlyContinue
+    return ($o -join "`n")
+}
+function Test-Json ($p) { try { $null = Get-Content -Raw $p | ConvertFrom-Json -ErrorAction Stop; return $true } catch { return $false } }
+$cx = Join-Path $ih '.codex/hooks.json'
+Check "install creates the codex hooks file" 'installed: ' (Ci install --agent codex)
+if (Test-Json $cx) { Ok "install writes valid JSON (created)" } else { Bad "install writes valid JSON (created)" (Get-Content -Raw $cx) }
+Check "install points at this code" '/adapters/codex/' (Get-Content -Raw $cx)
+Check "install twice changes nothing" 'already installed' (Ci install --agent codex)
+$gm = Join-Path $ih '.gemini/settings.json'; New-Item -ItemType Directory -Force -Path (Split-Path $gm) | Out-Null
+Set-Content -Path $gm -Value "{`n  `"theme`": `"dark`"`n}"; $gOrig = Get-Content -Raw $gm
+Ci install --agent gemini | Out-Null
+if (Test-Json $gm) { Ok "install merges into a file without hooks" } else { Bad "install merges into a file without hooks" (Get-Content -Raw $gm) }
+Check "install keeps the other settings" '"theme": "dark"' (Get-Content -Raw $gm)
+Ci uninstall --agent gemini | Out-Null
+if ((Get-Content -Raw $gm) -eq $gOrig) { Ok "uninstall restores the file exactly" } else { Bad "uninstall restores the file exactly" (Get-Content -Raw $gm) }
+$cu = Join-Path $ih '.cursor/hooks.json'; New-Item -ItemType Directory -Force -Path (Split-Path $cu) | Out-Null
+Set-Content -Path $cu -Value '{"version":1,"hooks":{"stop":[]}}'; $cOrig = Get-Content -Raw $cu
+$out = Ci install --agent cursor
+Check "install refuses existing hooks" 'merge these entries by hand' $out
+if ((Get-Content -Raw $cu) -eq $cOrig -and $script:ciRc -eq 1) { Ok "a refused install leaves the file alone" } else { Bad "a refused install leaves the file alone" "rc=$script:ciRc" }
+Ci uninstall --agent codex | Out-Null
+if (-not (Test-Path $cx)) { Ok "uninstall removes a file it created" } else { Bad "uninstall removes a file it created" 'still there' }
+Check "dry run prints the change" 'would write' (Ci install --agent codex --dry-run)
+if (-not (Test-Path $cx)) { Ok "dry run writes nothing" } else { Bad "dry run writes nothing" 'written' }
+if (-not $IsWindows) {
+    $real = Join-Path $ih 'real.json'; Set-Content -Path $real -Value '{}'
+    Remove-Item -Force $cu; New-Item -ItemType SymbolicLink -Path $cu -Target $real | Out-Null
+    Check "install refuses a symlinked config" 'is a symlink' (Ci install --agent cursor)
+    if ((Get-Item -Force $cu).LinkType) { Ok "the symlink stays a symlink" } else { Bad "the symlink stays a symlink" 'replaced' }
+}
+Ci install --agent codex | Out-Null; Add-Content -Path $cx -Value ' '
+Check "uninstall refuses a file changed since install" 'changed since install' (Ci uninstall --agent codex)
+$env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
+
 Write-Host "watch --ide (JetBrains MCP):"
 $ideStub = Join-Path $tmp 'ide_stub.ps1'
 Set-Content -Path $ideStub -Value @'

@@ -52,6 +52,7 @@ irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | 
 - **Учётные данные.** Провайдер `anthropic` ищет токен в таком порядке: `$CLAUDE_CODE_OAUTH_TOKEN`, запись `Claude Code-credentials` в Keychain macOS, затем `~/.claude/.credentials.json`. Он уходит только на `api.anthropic.com` и нигде не сохраняется.
 - **Файлы.** Кэш, флаги, логи и конфиг лежат в `~/.local/state/continuum` (см. [Настройка](#настройка)). CLI-инсталлятор кладёт код в `~/.continuum`, а символическую ссылку на него — в каталог из `PATH`. `continuum doctor` читает `~/.claude/settings.json`, кэш плагина и `~/.junie/extensions` только для отчёта; пишет лишь `doctor --fix`, и только копию статус-бара в `~/.claude/hooks/` и указатель на код в каталоге состояния.
 - **Уведомления.** Уведомление на рабочий стол (`osascript` / `notify-send` или твой `CONTINUUM_NOTIFY_CMD`), когда запуск resume закончился и когда лимит кончился посреди хода. Текст уходит в `osascript` аргументами, а не как скрипт.
+- **Конфиги агентов (только `continuum install --agent <x>`).** Пишет хуки адаптера в `~/.codex/hooks.json`, `~/.gemini/settings.json` или `~/.cursor/hooks.json` (сначала копия `<файл>.continuum-bak`; файл, где уже есть `"hooks"`, не трогает) или ставит симлинк плагина opencode в `~/.config/opencode/plugins/`. `continuum uninstall --agent <x>` откатывает, пока файл не менялся.
 - **IDE (только `watch --ide`).** Находит MCP-сервер запущенной JetBrains IDE на `127.0.0.1` (порты её процессов через `lsof` или `CONTINUUM_IDE_MCP_URL`), пишет предупреждение в `<проект>/.git/continuum-warning.md` и просит IDE открыть этот файл. Больше ничего не отправляет; без `--ide` — вообще ничего.
 - **Запуск без присмотра.** `continuum resume` запускает агента, когда никто не смотрит, по пресету агента или по `CONTINUUM_RESUME_CMD`; внутри треда bb вместо этого отправляет задачу в тот же тред через `bb thread tell`. Запуск происходит только по твоему выбору: вариант «сохранить и продолжить», ручной вызов команды или заранее заданный `CONTINUUM_RESUME_ON_LIMIT=1`, который планирует resume, когда лимит кончился посреди хода. Ставь узкую задачу и не направляй его на то, что не дал бы мержить незнакомцу.
 
@@ -81,6 +82,7 @@ continuum watch --ide # то же, плюс показать предупреж�
 continuum history     # последние 20 снимков, сделанных `continuum status`
 continuum cleanup     # удалить устаревшие файлы флагов и кэша (>24ч)
 continuum doctor      # почему нет предупреждения: провайдер, плагин, старые хуки, устаревшие копии (--fix: безопасные правки)
+continuum install --agent codex   # подключить адаптер в конфиг агента (codex|gemini|cursor|opencode; --dry-run)
 continuum providers   # anthropic, mock, spend
 continuum check       # печатает предупреждение при пересечении новой ступени, иначе ничего
 continuum statusline  # показать конфиг статус-бара
@@ -271,19 +273,19 @@ continuum statusline reset              # вернуть настройки по
 
 ## Codex CLI
 
-Адаптер лежит в [`adapters/codex/`](adapters/codex/README.md): хук `Stop` (`decision: block` — Codex продолжает и спрашивает тебя) и хук `PostToolUse` (`additionalContext`, посреди хода). Сам он ничего в конфиге Codex не меняет: добавь оба хука в `~/.codex/hooks.json`, как показано в README адаптера, и одобри их в `/hooks`. Codex запускает хук только после одобрения, и заново после каждого обновления. Пресет resume: `codex exec resume --last -c sandbox_mode=workspace-write "<задача>"`.
+Адаптер лежит в [`adapters/codex/`](adapters/codex/README.md): хук `Stop` (`decision: block` — Codex продолжает и спрашивает тебя) и хук `PostToolUse` (`additionalContext`, посреди хода). Сам он ничего в конфиге Codex не меняет: добавь оба хука в `~/.codex/hooks.json`, как показано в README адаптера (или `continuum install --agent <агент>`), и одобри их в `/hooks`. Codex запускает хук только после одобрения, и заново после каждого обновления. Пресет resume: `codex exec resume --last -c sandbox_mode=workspace-write "<задача>"`.
 
 ## Gemini CLI
 
-Адаптер лежит в [`adapters/gemini/`](adapters/gemini/README.md): хук `AfterAgent` (`decision: deny` — Gemini возвращает предупреждение как новый промпт) и хук `AfterTool` (`additionalContext`). Сам он ничего в конфиге Gemini не меняет: добавь оба хука в `~/.gemini/settings.json`, как показано в README адаптера. Пресет resume: `gemini --resume latest --approval-mode auto_edit -p "<задача>"`.
+Адаптер лежит в [`adapters/gemini/`](adapters/gemini/README.md): хук `AfterAgent` (`decision: deny` — Gemini возвращает предупреждение как новый промпт) и хук `AfterTool` (`additionalContext`). Сам он ничего в конфиге Gemini не меняет: добавь оба хука в `~/.gemini/settings.json`, как показано в README адаптера (или `continuum install --agent <агент>`). Пресет resume: `gemini --resume latest --approval-mode auto_edit -p "<задача>"`.
 
 ## Cursor
 
-Адаптер лежит в [`adapters/cursor/`](adapters/cursor/README.md): хук `stop` (`followup_message` — уходит следующим сообщением пользователя) и хук `postToolUse` (`additional_context`). Сам он ничего в конфиге Cursor не меняет: добавь оба хука в `~/.cursor/hooks.json`, как показано в README адаптера. Пресет resume: `agent -p --continue "<задача>"`. Без `--force` headless-агент только предлагает изменения. Чтобы он менял файлы и запускал команды без присмотра, включи это сам: `CONTINUUM_RESUME_CMD='agent -p --force --continue "{prompt}"'` — с той же осторожностью, что и любой запуск без присмотра.
+Адаптер лежит в [`adapters/cursor/`](adapters/cursor/README.md): хук `stop` (`followup_message` — уходит следующим сообщением пользователя) и хук `postToolUse` (`additional_context`). Сам он ничего в конфиге Cursor не меняет: добавь оба хука в `~/.cursor/hooks.json`, как показано в README адаптера (или `continuum install --agent <агент>`). Пресет resume: `agent -p --continue "<задача>"`. Без `--force` headless-агент только предлагает изменения. Чтобы он менял файлы и запускал команды без присмотра, включи это сам: `CONTINUUM_RESUME_CMD='agent -p --force --continue "{prompt}"'` — с той же осторожностью, что и любой запуск без присмотра.
 
 ## opencode
 
-Адаптер — плагин [`adapters/opencode/continuum.js`](adapters/opencode/README.md). На `session.idle` он отправляет предупреждение в сессию как промпт, после каждого вызова инструмента дописывает его к выводу инструмента. Ставится символической ссылкой в `~/.config/opencode/plugins/`, как показано в README адаптера. Он запускает только `continuum check`. Пресет resume: `opencode run --continue "<задача>"`.
+Адаптер — плагин [`adapters/opencode/continuum.js`](adapters/opencode/README.md). На `session.idle` он отправляет предупреждение в сессию как промпт, после каждого вызова инструмента дописывает его к выводу инструмента. Ставится символической ссылкой в `~/.config/opencode/plugins/`, как показано в README адаптера (или `continuum install --agent <агент>`). Он запускает только `continuum check`. Пресет resume: `opencode run --continue "<задача>"`.
 
 ## Junie (JetBrains)
 
@@ -296,8 +298,8 @@ bb — десктоп-приложение, которое запускает а
 ## Участие
 
 ```
-sh tests/run.sh          # 220 тестов, mock-провайдер, без сети (проходит и под dash)
-pwsh tests/run.ps1       # 176 тестов, та же сюита для PowerShell
+sh tests/run.sh          # 241 тест, mock-провайдер, без сети (проходит и под dash)
+pwsh tests/run.ps1       # 191 тест, та же сюита для PowerShell
 ```
 
 Каждая правка `.sh` дублируется в `.ps1`, с тестами в обе сюиты. Пригодится помощь с провайдером для другого бюджета (OpenAI, Gemini: см. [docs/writing-a-provider.md](docs/writing-a-provider.md)) и с адаптером для другого агента ([docs/harnesses.md](docs/harnesses.md)).

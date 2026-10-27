@@ -52,6 +52,7 @@ What the core reads, sends, writes and runs. Each adapter adds its own list, in 
 - **Credentials.** The `anthropic` provider looks for the token in this order: `$CLAUDE_CODE_OAUTH_TOKEN`, the macOS Keychain entry `Claude Code-credentials`, then `~/.claude/.credentials.json`. It goes only to `api.anthropic.com` and is never written anywhere.
 - **Files.** Cache, flags, logs and config go to `~/.local/state/continuum` (see [Configuration](#configuration)). The CLI installer puts the code in `~/.continuum` and a symlink to it on your `PATH`. `continuum doctor` reads `~/.claude/settings.json`, the plugin cache and `~/.junie/extensions` to report; only `doctor --fix` writes, and only the status line copy in `~/.claude/hooks/` and the root pointer in the state directory.
 - **Notifications.** A desktop notification (`osascript` / `notify-send`, or your `CONTINUUM_NOTIFY_CMD`) when a resume run ends and when the limit runs out mid-turn. The text goes to `osascript` as arguments, never as script.
+- **Agent configs (only `continuum install --agent <x>`).** Writes the adapter's hooks into `~/.codex/hooks.json`, `~/.gemini/settings.json` or `~/.cursor/hooks.json` (a backup `<file>.continuum-bak` first, refuses files that already have `"hooks"`), or links the opencode plugin into `~/.config/opencode/plugins/`. `continuum uninstall --agent <x>` undoes it while the file is unchanged.
 - **IDE (only `watch --ide`).** Finds the MCP server of a running JetBrains IDE on `127.0.0.1` (the ports its processes listen on, via `lsof`, or `CONTINUUM_IDE_MCP_URL`), writes the warning to `<project>/.git/continuum-warning.md` and asks the IDE to open that file. Nothing else is sent; nothing at all without `--ide`.
 - **Unattended runs.** `continuum resume` starts your agent with nobody watching, using the agent's preset or `CONTINUUM_RESUME_CMD`; inside a bb thread it sends the task to that thread with `bb thread tell` instead. It runs only when you ask for it: by choosing "save and resume", by running the command, or by setting `CONTINUUM_RESUME_ON_LIMIT=1` in advance, which schedules a resume when the limit runs out in the middle of a turn. Keep the task narrow, and don't point it at anything you wouldn't let a stranger merge.
 
@@ -81,6 +82,7 @@ continuum watch --ide # same, and show the warning in a JetBrains IDE (its AI ch
 continuum history     # last 20 snapshots taken by `continuum status`
 continuum cleanup     # remove stale flag/cache files (>24h old)
 continuum doctor      # why no warning: provider, plugin enabled, old hooks, stale copies (--fix: safe fixes)
+continuum install --agent codex   # wire an adapter into the agent's config (codex|gemini|cursor|opencode; --dry-run)
 continuum providers   # anthropic, mock, spend
 continuum check       # prints a warning when a new tier is crossed, else nothing
 continuum statusline  # show status-line format config
@@ -271,19 +273,19 @@ continuum statusline reset              # back to defaults
 
 ## Codex CLI
 
-The adapter lives in [`adapters/codex/`](adapters/codex/README.md): a `Stop` hook (`decision: block`, so Codex continues and asks you) and a `PostToolUse` hook (`additionalContext`, in the middle of a turn). It changes nothing in Codex's config by itself: add the two hooks to `~/.codex/hooks.json` as the adapter's README shows, then approve them in `/hooks`. Codex runs a hook only once you trust it, and again after each update. Resume preset: `codex exec resume --last -c sandbox_mode=workspace-write "<task>"`.
+The adapter lives in [`adapters/codex/`](adapters/codex/README.md): a `Stop` hook (`decision: block`, so Codex continues and asks you) and a `PostToolUse` hook (`additionalContext`, in the middle of a turn). It changes nothing in Codex's config by itself: add the two hooks to `~/.codex/hooks.json` as the adapter's README shows (or run `continuum install --agent codex`), then approve them in `/hooks`. Codex runs a hook only once you trust it, and again after each update. Resume preset: `codex exec resume --last -c sandbox_mode=workspace-write "<task>"`.
 
 ## Gemini CLI
 
-The adapter lives in [`adapters/gemini/`](adapters/gemini/README.md): an `AfterAgent` hook (`decision: deny`, so Gemini sends the warning back as a new prompt) and an `AfterTool` hook (`additionalContext`). It changes nothing in Gemini's config by itself: add the two hooks to `~/.gemini/settings.json` as the adapter's README shows. Resume preset: `gemini --resume latest --approval-mode auto_edit -p "<task>"`.
+The adapter lives in [`adapters/gemini/`](adapters/gemini/README.md): an `AfterAgent` hook (`decision: deny`, so Gemini sends the warning back as a new prompt) and an `AfterTool` hook (`additionalContext`). It changes nothing in Gemini's config by itself: add the two hooks to `~/.gemini/settings.json` as the adapter's README shows, or run `continuum install --agent gemini`. Resume preset: `gemini --resume latest --approval-mode auto_edit -p "<task>"`.
 
 ## Cursor
 
-The adapter lives in [`adapters/cursor/`](adapters/cursor/README.md): a `stop` hook (`followup_message`, sent as the next user message) and a `postToolUse` hook (`additional_context`). It changes nothing in Cursor's config by itself: add the two hooks to `~/.cursor/hooks.json` as the adapter's README shows. Resume preset: `agent -p --continue "<task>"`. Without `--force` the headless agent only proposes changes. To let it change files and run commands unattended, opt in yourself: `CONTINUUM_RESUME_CMD='agent -p --force --continue "{prompt}"'`, with the same care as any unattended run.
+The adapter lives in [`adapters/cursor/`](adapters/cursor/README.md): a `stop` hook (`followup_message`, sent as the next user message) and a `postToolUse` hook (`additional_context`). It changes nothing in Cursor's config by itself: add the two hooks to `~/.cursor/hooks.json` as the adapter's README shows, or run `continuum install --agent cursor`. Resume preset: `agent -p --continue "<task>"`. Without `--force` the headless agent only proposes changes. To let it change files and run commands unattended, opt in yourself: `CONTINUUM_RESUME_CMD='agent -p --force --continue "{prompt}"'`, with the same care as any unattended run.
 
 ## opencode
 
-The adapter is a plugin, [`adapters/opencode/continuum.js`](adapters/opencode/README.md). On `session.idle` it sends the warning to the session as a prompt; after each tool call it appends it to the tool output. Install it with a symlink into `~/.config/opencode/plugins/`, as the adapter's README shows. It runs `continuum check` and nothing else. Resume preset: `opencode run --continue "<task>"`.
+The adapter is a plugin, [`adapters/opencode/continuum.js`](adapters/opencode/README.md). On `session.idle` it sends the warning to the session as a prompt; after each tool call it appends it to the tool output. Install it with a symlink into `~/.config/opencode/plugins/`, as the adapter's README shows, or with `continuum install --agent opencode`. It runs `continuum check` and nothing else. Resume preset: `opencode run --continue "<task>"`.
 
 ## Junie (JetBrains)
 
@@ -296,8 +298,8 @@ bb is a desktop app that runs agents in threads, so the warning comes from the a
 ## Contributing
 
 ```
-sh tests/run.sh          # 220 tests, mock provider, no network (also passes under dash)
-pwsh tests/run.ps1       # 176 tests, the same suite for PowerShell
+sh tests/run.sh          # 241 tests, mock provider, no network (also passes under dash)
+pwsh tests/run.ps1       # 191 tests, the same suite for PowerShell
 ```
 
 Every `.sh` change has a matching `.ps1` change, with tests in both suites. Help is welcome with a provider for another budget (OpenAI, Gemini: see [docs/writing-a-provider.md](docs/writing-a-provider.md)) and an adapter for another agent ([docs/harnesses.md](docs/harnesses.md)).

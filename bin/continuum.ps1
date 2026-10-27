@@ -26,7 +26,9 @@ param(
     # `doctor --fix` binds here under `pwsh -File`, positionally in-process.
     [switch]$Fix,
     # `watch --ide`, the same way.
-    [switch]$Ide
+    [switch]$Ide,
+    # `install --dry-run`, the same way (the alias carries the dash).
+    [Alias('dry-run')][switch]$DryRun
 )
 
 # param() must be the first statement in the file - everything else comes after.
@@ -649,6 +651,109 @@ function Invoke-CntDoctor {
     if ($script:docFails -gt 0) { exit 1 }
 }
 
+# `install --agent <x> [--dry-run]` / `uninstall --agent <x>`; mirrors bin/continuum (R5).
+# Only shapes we can edit safely: no file -> create; a file without "hooks" -> insert the
+# block (backup first); hooks already there -> refuse with the snippet. Uninstall undoes
+# it only while the file is unchanged since install. Never half-writes.
+function Get-CntInstFile ($a) {
+    # $env:HOME first: tests (and users) point it elsewhere; $HOME itself cannot be overridden.
+    $HOMEDIR = $(if ($env:HOME) { $env:HOME } else { $HOME })
+    switch ($a) {
+        'codex'    { $h = $(if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOMEDIR '.codex' }); return (Join-Path $h 'hooks.json') }
+        'gemini'   { return (Join-Path $HOMEDIR '.gemini/settings.json') }
+        'cursor'   { return (Join-Path $HOMEDIR '.cursor/hooks.json') }
+        'opencode' { $c = $(if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $HOMEDIR '.config' }); return (Join-Path $c 'opencode/plugins/continuum.js') }
+    }
+}
+function Get-CntInstHooks ($a, $r) {
+    # JSON string of the hook command: sh on macOS/Linux, the .ps1 twin on Windows (no sh there
+    # unless Git Bash), as each adapter's README shows.
+    $c = {
+        param($name)
+        if ($IsWindows) { return "`"pwsh -NoProfile -File \`"$r/adapters/$a/$name.ps1\`"`"" }
+        return "`"sh \`"$r/adapters/$a/$name.sh\`"`""
+    }
+    switch ($a) {
+        'codex'  { return "  `"hooks`": {`n    `"Stop`": [{ `"hooks`": [{ `"type`": `"command`", `"command`": $(& $c 'stop') }] }],`n    `"PostToolUse`": [{ `"hooks`": [{ `"type`": `"command`", `"command`": $(& $c 'tool-check') }] }]`n  }" }
+        'gemini' { return "  `"hooks`": {`n    `"AfterAgent`": [{ `"hooks`": [{ `"type`": `"command`", `"command`": $(& $c 'after-agent') }] }],`n    `"AfterTool`": [{ `"matcher`": `".*`", `"hooks`": [{ `"type`": `"command`", `"command`": $(& $c 'after-tool') }] }]`n  }" }
+        'cursor' { return "  `"version`": 1,`n  `"hooks`": {`n    `"stop`": [{ `"command`": $(& $c 'stop') }],`n    `"postToolUse`": [{ `"command`": $(& $c 'tool-check') }]`n  }" }
+    }
+}
+function Invoke-CntInstall {
+    param([string]$Action, [string]$AgentName, [bool]$Dry)
+    switch ($AgentName) {
+        'claude' { 'Claude Code installs continuum as a plugin: claude plugin install continuum@continuum (or /plugin in a session). See README → Claude Code.'; return }
+        'junie'  { 'Junie installs continuum as an extension: in Junie, /extensions → add the marketplace https://github.com/TropinAlexey/continuum → install continuum.'; return }
+        { $_ -in 'codex', 'gemini', 'cursor', 'opencode' } { break }
+        default  { [Console]::Error.WriteLine("continuum ${Action}: --agent codex|gemini|cursor|opencode (claude and junie install as plugins)"); exit 1 }
+    }
+    # The code path lands inside a shell command in the agent's config: allow only
+    # characters that need no quoting, so no path can turn into shell syntax.
+    $r = ((Resolve-Path $script:CntRoot).Path) -replace '\\', '/'
+    if ($r -notmatch '^[A-Za-z0-9/._+@~:-]+$') { [Console]::Error.WriteLine("continuum ${Action}: the code path '$r' has characters that are unsafe in a hook command; install continuum to a plain path"); exit 1 }
+    $f = Get-CntInstFile $AgentName
+    $rec = Join-Path $script:CntState ".continuum-install-$AgentName"
+    New-Item -ItemType Directory -Force -Path $script:CntState | Out-Null
+
+    if ($AgentName -eq 'opencode') {
+        $src = "$r/adapters/opencode/continuum.js"
+        $item = Get-Item -Force $f -ErrorAction SilentlyContinue
+        $ours = $item -and $item.LinkType -eq 'SymbolicLink' -and (@($item.Target)[0] -replace '\\', '/') -eq $src
+        if ($Action -eq 'install') {
+            if ($ours) { "already installed: $f"; return }
+            if ($item) { [Console]::Error.WriteLine("continuum install: $f exists and is not ours; remove it, then link it to $src"); exit 1 }
+            if ($Dry) { "would link $f -> $src"; return }
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $f) | Out-Null
+            New-Item -ItemType SymbolicLink -Path $f -Target $src | Out-Null
+            "linked $f -> $src (restart opencode)"
+        } elseif ($ours) {
+            if ($Dry) { "would remove $f"; return }
+            Remove-Item -Force $f; "removed $f"
+        } else { "nothing to uninstall: $f is not continuum's link" }
+        return
+    }
+
+    # A symlinked config (dotfiles) would be replaced by a plain file on move: leave it alone.
+    $fi = Get-Item -Force $f -ErrorAction SilentlyContinue
+    if ($fi -and $fi.LinkType) { [Console]::Error.WriteLine("continuum ${Action}: $f is a symlink (dotfiles?); edit the file it points to by hand"); exit 1 }
+    $block = Get-CntInstHooks $AgentName $r
+    $sum = { param($p) (Get-FileHash -Algorithm SHA256 $p).Hash }
+    if ($Action -eq 'install') {
+        $cur = $(if (Test-Path $f) { [System.IO.File]::ReadAllText($f) } else { $null })
+        if ($cur -and $cur.Contains("/adapters/$AgentName/")) { "already installed: $f"; return }
+        if (-not $cur -or -not ($cur -replace '[\s{}]', '')) {
+            $mode = 'created'; $new = "{`n$block`n}`n"
+        } elseif ($cur -match '"hooks"\s*:') {
+            [Console]::Error.WriteLine("continuum install: $f already has `"hooks`"; merge these entries by hand:`n$block"); exit 1
+        } elseif ($cur.TrimStart()[0] -ne '{') {
+            [Console]::Error.WriteLine("continuum install: $f does not start with '{'; not touching it"); exit 1
+        } else {
+            $mode = 'inserted'
+            $k = $cur.IndexOf('{')
+            $rest = $cur.Substring($k + 1)
+            $new = $cur.Substring(0, $k + 1) + "`n$block," + $(if ($rest -match '^[ \t]*\r?\n') { $rest } else { "`n" + $rest })
+        }
+        # Never write a config we did not build in full.
+        try { $null = $new | ConvertFrom-Json -ErrorAction Stop } catch { [Console]::Error.WriteLine("continuum install: could not build the new $f; not touching it"); exit 1 }
+        if ($Dry) { "would write ${f}:"; $new; return }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $f) | Out-Null
+        if (Test-Path $f) { Copy-Item -Force $f "$f.continuum-bak" }
+        [System.IO.File]::WriteAllText("$f.continuum-tmp", $new)
+        Move-Item -Force "$f.continuum-tmp" $f
+        [System.IO.File]::WriteAllText($rec, "$mode`n$(& $sum $f)")
+        if (Test-Path "$f.continuum-bak") { "installed: $f (backup: $f.continuum-bak)" } else { "installed: $f" }
+        if ($AgentName -eq 'codex') { 'Codex runs hooks only once trusted: approve them in /hooks.' }
+        return
+    }
+    if (-not (Test-Path $rec)) { "nothing to uninstall: continuum did not install into $f"; return }
+    $lines = [System.IO.File]::ReadAllLines($rec)
+    if (-not (Test-Path $f)) { Remove-Item -Force $rec; "already gone: $f"; return }
+    if ((& $sum $f) -ne $lines[1]) { [Console]::Error.WriteLine("continuum uninstall: $f changed since install; remove the hooks that point to $r/adapters/$AgentName/ by hand"); exit 1 }
+    if ($Dry) { "would restore $f ($($lines[0]))"; return }
+    if (Test-Path "$f.continuum-bak") { Move-Item -Force "$f.continuum-bak" $f } else { Remove-Item -Force $f }
+    Remove-Item -Force $rec; "uninstalled: $f"
+}
+
 function Invoke-Cleanup {
     $cleaned = 0
     $cutoff = (Get-Date).AddHours(-24)
@@ -741,6 +846,15 @@ switch ($Command) {
     'resume'    { Invoke-Resume $Arg1 $Arg2 $Arg3 }
     'history'   { Invoke-CntHistory }
     'cleanup'   { Invoke-Cleanup }
+    { $_ -in 'install', 'uninstall' } {
+        $ag = $Agent; $dr = [bool]$DryRun
+        $rest = @($Arg1, $Arg2, $Arg3, $Arg4 | Where-Object { $_ })
+        for ($i = 0; $i -lt $rest.Count; $i++) {
+            if ($rest[$i] -eq '--agent' -and $i + 1 -lt $rest.Count) { $ag = $rest[$i + 1]; $i++ }
+            elseif ($rest[$i] -eq '--dry-run') { $dr = $true }
+        }
+        Invoke-CntInstall $Command $ag $dr
+    }
     'doctor'    { Invoke-CntDoctor $(if ($Fix) { '--fix' } else { $Arg1 }) }
     'statusline' { Invoke-StatuslineConfig $Arg1 $Arg2 }
     default     { [Console]::Error.WriteLine("continuum: unknown command '$Command'"); exit 1 }
