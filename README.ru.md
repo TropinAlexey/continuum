@@ -99,7 +99,7 @@ continuum resume "$(continuum reset)" "$PWD" "доделать тесты Docume
 | **Gemini CLI** | [адаптер](#gemini-cli), `settings.json` | `CONTINUUM_AGENT=gemini` | Новый: тесты в CI, вживую ещё не запускался |
 | **Cursor** | [адаптер](#cursor), `hooks.json` | `CONTINUUM_AGENT=cursor` | Новый: тесты в CI, вживую ещё не запускался |
 | **opencode** | [адаптер](#opencode), JS-плагин | `CONTINUUM_AGENT=opencode` | Новый: тесты в CI, вживую ещё не запускался |
-| **Junie** (JetBrains: RustRover, IDEA, …) | плагин Claude Code, установленный как расширение Junie ([Junie](#junie-jetbrains)) | `CONTINUUM_AGENT=junie` | Новый: проверен вживую (CLI); чат в IDE хуки пока не вызывает |
+| **Junie** (JetBrains: RustRover, IDEA, …) | плагин Claude Code, установленный как расширение Junie ([Junie](#junie-jetbrains)) | `CONTINUUM_AGENT=junie` | Проверен вживую (Junie CLI 26.10.20, batch); чат в IDE хуки пока не вызывает |
 | **bb** (приложение) | адаптер агента, запущенного в треде ([bb](#bb)) | автоматически: `bb thread tell` в тот же тред | Новый: тесты в CI, вживую ещё не запускался |
 | Любой другой | `continuum check` из хука или `continuum watch` в отдельной панели | задай `CONTINUUM_RESUME_CMD` | Работает уже сейчас |
 
@@ -108,7 +108,7 @@ CONTINUUM_AGENT=codex continuum resume 21:41 "$PWD" "finish the tests"
 CONTINUUM_RESUME_CMD='myagent run "{prompt}"' continuum resume 21:41 "$PWD" "finish the tests"
 ```
 
-«Тесты в CI» — ответы каждого адаптера сверяются с документированным протоколом хуков агента. «Проверен вживую» — настоящая сессия этого агента получила предупреждение. Если запустишь какой-то вживую, расскажи, как прошло (issue или PR в [docs/harnesses.md](docs/harnesses.md)).
+«Тесты в CI» — ответы каждого адаптера сверяются с документированным протоколом хуков агента. «Проверен вживую» — настоящая сессия этого агента получила предупреждение; что, когда и как проверялось — в [docs/live-checks.md](docs/live-checks.md). Если запустишь какой-то вживую, расскажи, как прошло (issue или PR в [docs/harnesses.md](docs/harnesses.md)).
 
 Агент и провайдер независимы: сессия Codex может следить за окном Anthropic, и наоборот. Что проверено и как написать адаптер — в [docs/harnesses.md](docs/harnesses.md).
 

@@ -1,6 +1,6 @@
 # R2. Live checks of every adapter
 
-Status: agreed
+Status: in progress (Junie done; bb after the Claude window resets; opencode needs a paid model; Codex/Gemini/Cursor not installed)
 Date: 2026-10-26
 Roadmap: [2026-10-26-roadmap.md](2026-10-26-roadmap.md)
 

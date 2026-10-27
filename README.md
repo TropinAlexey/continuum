@@ -99,7 +99,7 @@ The core (`bin/`, `lib/`, `providers/`) never asks which agent is calling. Each 
 | **Gemini CLI** | [adapter](#gemini-cli), `settings.json` | `CONTINUUM_AGENT=gemini` | New: tested in CI, not yet run live |
 | **Cursor** | [adapter](#cursor), `hooks.json` | `CONTINUUM_AGENT=cursor` | New: tested in CI, not yet run live |
 | **opencode** | [adapter](#opencode), JS plugin | `CONTINUUM_AGENT=opencode` | New: tested in CI, not yet run live |
-| **Junie** (JetBrains: RustRover, IDEA, …) | the Claude Code plugin, installed as a Junie extension ([Junie](#junie-jetbrains)) | `CONTINUUM_AGENT=junie` | New: run live (CLI); the IDE chat calls no hooks yet |
+| **Junie** (JetBrains: RustRover, IDEA, …) | the Claude Code plugin, installed as a Junie extension ([Junie](#junie-jetbrains)) | `CONTINUUM_AGENT=junie` | Run live (Junie CLI 26.10.20, batch); the IDE chat calls no hooks yet |
 | **bb** (app) | the adapter of the agent in the thread ([bb](#bb)) | automatic: `bb thread tell` into the same thread | New: tested in CI, not yet run live |
 | Anything else | `continuum check` from a hook, or `continuum watch` in a spare pane | set `CONTINUUM_RESUME_CMD` | Works today |
 
@@ -108,7 +108,7 @@ CONTINUUM_AGENT=codex continuum resume 21:41 "$PWD" "finish the tests"
 CONTINUUM_RESUME_CMD='myagent run "{prompt}"' continuum resume 21:41 "$PWD" "finish the tests"
 ```
 
-"Tested in CI" means each adapter's replies are checked against the agent's documented hook protocol. "Run live" means a real session of that agent received the warning. If you run one live, tell us how it went (an issue or a PR to [docs/harnesses.md](docs/harnesses.md)).
+"Tested in CI" means each adapter's replies are checked against the agent's documented hook protocol. "Run live" means a real session of that agent received the warning; what was run, when and how is in [docs/live-checks.md](docs/live-checks.md). If you run one live, tell us how it went (an issue or a PR to [docs/harnesses.md](docs/harnesses.md)).
 
 The agent and the provider are independent: a Codex session can watch the Anthropic window, and the other way round. See [docs/harnesses.md](docs/harnesses.md) for what is tested and how to write an adapter.
 
