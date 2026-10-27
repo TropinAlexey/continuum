@@ -52,6 +52,7 @@ irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | 
 - **Учётные данные.** Провайдер `anthropic` ищет токен в таком порядке: `$CLAUDE_CODE_OAUTH_TOKEN`, запись `Claude Code-credentials` в Keychain macOS, затем `~/.claude/.credentials.json`. Он уходит только на `api.anthropic.com` и нигде не сохраняется.
 - **Файлы.** Кэш, флаги, логи и конфиг лежат в `~/.local/state/continuum` (см. [Настройка](#настройка)). CLI-инсталлятор кладёт код в `~/.continuum`, а символическую ссылку на него — в каталог из `PATH`. `continuum doctor` читает `~/.claude/settings.json`, кэш плагина и `~/.junie/extensions` только для отчёта; пишет лишь `doctor --fix`, и только копию статус-бара в `~/.claude/hooks/` и указатель на код в каталоге состояния.
 - **Уведомления.** Уведомление на рабочий стол (`osascript` / `notify-send` или твой `CONTINUUM_NOTIFY_CMD`), когда запуск resume закончился и когда лимит кончился посреди хода. Текст уходит в `osascript` аргументами, а не как скрипт.
+- **IDE (только `watch --ide`).** Находит MCP-сервер запущенной JetBrains IDE на `127.0.0.1` (порты её процессов через `lsof` или `CONTINUUM_IDE_MCP_URL`), пишет предупреждение в `<проект>/.git/continuum-warning.md` и просит IDE открыть этот файл. Больше ничего не отправляет; без `--ide` — вообще ничего.
 - **Запуск без присмотра.** `continuum resume` запускает агента, когда никто не смотрит, по пресету агента или по `CONTINUUM_RESUME_CMD`; внутри треда bb вместо этого отправляет задачу в тот же тред через `bb thread tell`. Запуск происходит только по твоему выбору: вариант «сохранить и продолжить», ручной вызов команды или заранее заданный `CONTINUUM_RESUME_ON_LIMIT=1`, который планирует resume, когда лимит кончился посреди хода. Ставь узкую задачу и не направляй его на то, что не дал бы мержить незнакомцу.
 
 ## Что происходит
@@ -76,6 +77,7 @@ continuum status      # 5 hours   86.5%   resets at 21:40
 continuum reset       # 21:41   (сброс +90с, готово для планировщика)
 continuum estimate    # при таком темпе ещё ~2ч 15м
 continuum watch       # опрос в отдельной панели; звонок на пороге
+continuum watch --ide # то же, плюс показать предупреждение в JetBrains IDE (её AI-чат хуки не вызывает)
 continuum history     # последние 20 снимков, сделанных `continuum status`
 continuum cleanup     # удалить устаревшие файлы флагов и кэша (>24ч)
 continuum doctor      # почему нет предупреждения: провайдер, плагин, старые хуки, устаревшие копии (--fix: безопасные правки)
@@ -169,6 +171,7 @@ macOS, Linux, FreeBSD/OpenBSD/NetBSD, Windows (Git Bash или PowerShell). POSI
 | `CONTINUUM_RESUME_CMD` | пресет агента | Команда агента для `resume`. `{prompt}` — задача. Важнее пресета. |
 | `CONTINUUM_RESUME_ON_LIMIT` | выкл. | `1`: когда лимит кончился посреди хода (`StopFailure`), запланировать resume на сброс по пресету агента. Только если сброс в ближайшие 24 ч; один на каталог за окно. Согласие заранее. |
 | `CONTINUUM_NOTIFY_CMD` | `osascript` / `notify-send` | Заменить уведомлялку; получает заголовок и текст двумя аргументами. |
+| `CONTINUUM_IDE_MCP_URL` | ищется через `lsof` | MCP-эндпоинт JetBrains IDE для `watch --ide`, например `http://127.0.0.1:64342/stream`. |
 | `CONTINUUM_DRY_RUN` | — | `resume` печатает план вместо планирования. |
 | `CONTINUUM_OFF` | — | Отключает предупреждение (`continuum check` и все хуки адаптеров). |
 | `CONTINUUM_FRUGAL` | — | `1` = экономный режим: адаптеры, которые умеют, блокируют вызовы субагентов. |
@@ -284,7 +287,7 @@ continuum statusline reset              # вернуть настройки по
 
 ## Junie (JetBrains)
 
-Junie CLI ставит плагины Claude Code как расширения и запускает их хуки, поэтому continuum работает в нём как есть: в Junie `/extensions`, добавь маркетплейс `https://github.com/TropinAlexey/continuum`, установи `continuum`. Адаптер Claude Code узнаёт Junie по событиям (`project_path` без `transcript_path`): предупреждение просит Junie закончить итоговое сообщение вопросом (инструмента вопроса у неё нет), проверка внутри хода идёт на `PreToolUse` (`PostToolUse` у Junie нет), настройки Claude Code не трогаются. Пресет resume: `junie --skip-update-check --resume --task "<задача>"`. В IDE (RustRover, IntelliJ IDEA, Rider, …) агента для AI-чата выбираешь сам; Junie там идёт через ACP, а он хуки пока не вызывает, другие агенты чата ещё не проверены: используй Junie CLI или Claude Code в терминале IDE, либо `continuum watch`. Подробно — [`adapters/junie/`](adapters/junie/README.md).
+Junie CLI ставит плагины Claude Code как расширения и запускает их хуки, поэтому continuum работает в нём как есть: в Junie `/extensions`, добавь маркетплейс `https://github.com/TropinAlexey/continuum`, установи `continuum`. Адаптер Claude Code узнаёт Junie по событиям (`project_path` без `transcript_path`): предупреждение просит Junie закончить итоговое сообщение вопросом (инструмента вопроса у неё нет), проверка внутри хода идёт на `PreToolUse` (`PostToolUse` у Junie нет), настройки Claude Code не трогаются. Пресет resume: `junie --skip-update-check --resume --task "<задача>"`. В IDE (RustRover, IntelliJ IDEA, Rider, …) агента для AI-чата выбираешь сам; Junie там идёт через ACP, а он хуки пока не вызывает, другие агенты чата ещё не проверены: используй Junie CLI или Claude Code в терминале IDE, либо `continuum watch --ide` — он покажет предупреждение в самой IDE через её MCP-сервер (включить: Settings | Tools | MCP Server). Подробно — [`adapters/junie/`](adapters/junie/README.md).
 
 ## bb
 
@@ -293,8 +296,8 @@ bb — десктоп-приложение, которое запускает а
 ## Участие
 
 ```
-sh tests/run.sh          # 213 тестов, mock-провайдер, без сети (проходит и под dash)
-pwsh tests/run.ps1       # 171 тест, та же сюита для PowerShell
+sh tests/run.sh          # 220 тестов, mock-провайдер, без сети (проходит и под dash)
+pwsh tests/run.ps1       # 176 тестов, та же сюита для PowerShell
 ```
 
 Каждая правка `.sh` дублируется в `.ps1`, с тестами в обе сюиты. Пригодится помощь с провайдером для другого бюджета (OpenAI, Gemini: см. [docs/writing-a-provider.md](docs/writing-a-provider.md)) и с адаптером для другого агента ([docs/harnesses.md](docs/harnesses.md)).

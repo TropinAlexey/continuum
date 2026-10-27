@@ -444,6 +444,34 @@ if ($script:docRc -eq 1) { Ok "doctor: a fail exits 1" } else { Bad "doctor: a f
 if ((Get-Content -Raw (Join-Path $dr 'claude/settings.json')) -eq $before) { Ok "doctor --fix never edits settings.json" } else { Bad "doctor --fix never edits settings.json" "changed" }
 $env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
 
+Write-Host "watch --ide (JetBrains MCP):"
+$ideStub = Join-Path $tmp 'ide_stub.ps1'
+Set-Content -Path $ideStub -Value @'
+Add-Content -Path $env:IDE_LOG -Value ("{0} {1}" -f $args[1], $args[2])
+if ($args[2] -match '"initialize"') { 'sid-1'; '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"RustRover MCP Server"}}}' }
+elseif ($args[2] -match 'tools/call') { 'sid-1'; '{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"[success]"}]}}' }
+else { 'sid-1'; '' }
+'@
+$ideRepo = Join-Path $tmp 'ide_repo'; New-Item -ItemType Directory -Force -Path $ideRepo | Out-Null; & git -C $ideRepo init -q
+$ideLog = Join-Path $tmp 'ide.log'
+function Iw ($dir, $a1, $a2) {
+    $env:IDE_LOG = $ideLog; $env:CONTINUUM_IDE_MCP_CMD = "pwsh -NoProfile -File $ideStub"; $env:CONTINUUM_IDE_MCP_URL = 'http://127.0.0.1:1/stream'
+    Push-Location $dir
+    $o = & pwsh -NoProfile -File (Join-Path $root 'bin/continuum.ps1') watch $a1 $a2 2>&1
+    Pop-Location
+    Remove-Item Env:IDE_LOG, Env:CONTINUUM_IDE_MCP_CMD, Env:CONTINUUM_IDE_MCP_URL -ErrorAction SilentlyContinue
+    return ($o -join "`n")
+}
+Set-Content -Path $ideLog -Value ''
+$out = Iw $ideRepo '--ide' '1'
+Check "watch --ide still prints the warning" 'continuum: 86% used' $out
+Check "watch --ide writes the warning file" '86% of the usage window used' (Get-Content -Raw (Join-Path $ideRepo '.git/continuum-warning.md') -ErrorAction SilentlyContinue)
+Check "watch --ide opens it in the IDE" '"name":"open_file_in_editor","arguments":{"filePath":".git/continuum-warning.md","rootFolder":"' (Get-Content -Raw $ideLog)
+if (-not (& git -C $ideRepo status --porcelain)) { Ok "watch --ide leaves git status clean" } else { Bad "watch --ide leaves git status clean" "dirty" }
+Set-Content -Path $ideLog -Value ''
+Iw $ideRepo '1' $null | Out-Null
+if (-not (Get-Content -Raw $ideLog).Trim()) { Ok "watch without --ide sends nothing to the IDE" } else { Bad "watch without --ide sends nothing to the IDE" (Get-Content -Raw $ideLog) }
+
 Write-Host "limit hit mid-turn (StopFailure):"
 # rate_limit -> log line, notification, note for the next start; never a resume
 # unless CONTINUUM_RESUME_ON_LIMIT=1. The notifier is swapped for a recorder.

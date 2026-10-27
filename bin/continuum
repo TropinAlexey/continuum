@@ -9,7 +9,9 @@
 #                               print a warning if a new tier was crossed, else nothing
 #   continuum limit-hit [session] [agent] [dir]
 #                               the limit ran out mid-turn: log, notify, note for next start
-#   continuum watch [seconds]   poll until the threshold is crossed, then say so
+#   continuum watch [--ide] [seconds]
+#                               poll until the threshold is crossed, then say so
+#                               (--ide: also show it in a JetBrains IDE via its MCP server)
 #   continuum resume HH:MM [dir] [prompt]
 #                               schedule the agent to pick up after the reset
 #   continuum history           show recent usage snapshots
@@ -507,9 +509,66 @@ cmd_limit_hit() {
 
 # Harness-independent fallback: no hooks, no plugin, works with any agent in any
 # shell. Poll until the threshold is crossed, say so, exit. Run it in a spare pane.
+# JetBrains IDE (R1): the AI chat runs agents through ACP, where no hooks fire, so an
+# outside poller shows the warning in the IDE through its MCP server. The IDE opens only
+# files inside an open project, so the text goes to <project>/.git/continuum-warning.md:
+# inside the project, never tracked, never in `git status`. Opt-in: `watch --ide` only.
+
+# The IDE's MCP endpoints: CONTINUUM_IDE_MCP_URL, or the loopback ports JetBrains IDE
+# processes listen on (their MCP port changes on every restart). Never other processes.
+ide_endpoints() {
+    if [ -n "${CONTINUUM_IDE_MCP_URL:-}" ]; then printf '%s\n' "$CONTINUUM_IDE_MCP_URL"; return 0; fi
+    command -v lsof >/dev/null 2>&1 || return 0
+    lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk '
+        tolower($1) ~ /^(rider|rustrover|idea|pycharm|goland|webstorm|clion|phpstorm|rubymine|datagrip|aqua|dataspell)/ \
+        && $9 ~ /^127\.0\.0\.1:[0-9]+$/ { sub(/.*:/, "", $9); print "http://127.0.0.1:" $9 "/stream" }' | sort -u
+}
+
+# ide_rpc URL SESSION JSON -> line 1: session id, then the response body (SSE "data: "
+# stripped). CONTINUUM_IDE_MCP_CMD replaces the transport (tests): same arguments, same output.
+ide_rpc() {
+    if [ -n "${CONTINUUM_IDE_MCP_CMD:-}" ]; then
+        # shellcheck disable=SC2086
+        $CONTINUUM_IDE_MCP_CMD "$1" "$2" "$3"; return
+    fi
+    command -v curl >/dev/null 2>&1 || return 1
+    _h="$CNT_STATE/.continuum-ide.$$.h"
+    if [ -n "$2" ]; then
+        _b=$(curl -s -m 5 -D "$_h" -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H "Mcp-Session-Id: $2" -d "$3" "$1") || { rm -f "$_h"; return 1; }
+    else
+        _b=$(curl -s -m 5 -D "$_h" -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d "$3" "$1") || { rm -f "$_h"; return 1; }
+    fi
+    _s=$(awk -F': *' 'tolower($1) == "mcp-session-id" { print $2 }' "$_h" 2>/dev/null | tr -d '\r')
+    rm -f "$_h"
+    printf '%s\n%s\n' "${_s:-$2}" "$(printf '%s' "$_b" | sed 's/^data: //')"
+}
+
+# ide_show TEXT [DIR] -> 0 when an IDE with DIR's project open showed the warning.
+ide_show() {
+    top=$(git -C "${2:-$PWD}" rev-parse --show-toplevel 2>/dev/null) && [ -d "$top/.git" ] || {
+        echo "continuum: --ide needs a git checkout (the warning goes to .git/continuum-warning.md)" >&2; return 1; }
+    printf '%s\n' "$1" > "$top/.git/continuum-warning.md" 2>/dev/null || return 1
+    mkdir -p "$CNT_STATE" 2>/dev/null || true     # ide_rpc keeps response headers there
+    jtop=$(printf '%s' "$top" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    for url in $(ide_endpoints); do
+        r=$(ide_rpc "$url" "" '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"continuum","version":"1"}}}') || continue
+        printf '%s' "$r" | grep -q 'MCP Server' || continue
+        sid=$(printf '%s\n' "$r" | head -1)
+        ide_rpc "$url" "$sid" '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null 2>&1 || true
+        r=$(ide_rpc "$url" "$sid" '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open_file_in_editor","arguments":{"filePath":".git/continuum-warning.md","rootFolder":"'"$jtop"'"}}}') || continue
+        printf '%s' "$r" | grep -qE '"isError"[[:space:]]*:[[:space:]]*true|"error"[[:space:]]*:' && continue
+        printf '%s' "$r" | grep -q '"result"' && return 0
+    done
+    echo "continuum: no JetBrains IDE with $top open answered on MCP (Settings | Tools | MCP Server)" >&2
+    return 1
+}
+
 cmd_watch() {
     threshold="${CONTINUUM_THRESHOLD:-80}"
-    every="${1:-300}"
+    every=300; ide=""
+    for a in "$@"; do
+        case "$a" in --ide) ide=1 ;; *[!0-9]*|'') echo "continuum watch: unknown argument '$a'" >&2; exit 1 ;; *) every=$a ;; esac
+    done
     while :; do
         if lines=$(cnt_read 2>/dev/null); then
             util=$(printf '%s\n' "$lines" | cnt_field 2)
@@ -519,9 +578,18 @@ cmd_watch() {
                 reset=$(printf '%s\n' "$lines" | cnt_field 3)
                 when="?"
                 [ "$reset" != "-" ] && when=$(cnt_epoch_hhmm "$reset" 2>/dev/null || echo "?")
+                at=$(cnt_epoch_hhmm "$reset" 90 2>/dev/null || echo "$when")
                 printf '\007continuum: %s%% used, resets at %s\n' "$util_i" "$when"
-                printf 'Wrap up, or: continuum resume %s "$PWD" "<task>"\n' \
-                       "$(cnt_epoch_hhmm "$reset" 90 2>/dev/null || echo "$when")"
+                printf 'Wrap up, or: continuum resume %s "$PWD" "<task>"\n' "$at"
+                if [ -n "$ide" ]; then
+                    ide_show "# continuum: ${util_i}% of the usage window used
+
+Resets at ${when}. Tell the agent in the chat to wrap up, or to save its state, then:
+
+    continuum resume ${at} \"\$PWD\" \"<the task to pick up>\"
+
+(Shown by \`continuum watch --ide\`. This file lives in .git/ and is never committed.)" "$PWD" || true
+                fi
                 return 0
             fi
             printf 'continuum: %s%% used, below %s%%\n' "$util_i" "$threshold"

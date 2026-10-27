@@ -45,8 +45,8 @@
 ## Команды
 
 ```sh
-sh tests/run.sh          # 213 тестов, mock, без сети (эталон; проходит и под dash)
-pwsh tests/run.ps1       # 171 тест, та же сюита для PowerShell
+sh tests/run.sh          # 220 тестов, mock, без сети (эталон; проходит и под dash)
+pwsh tests/run.ps1       # 176 тестов, та же сюита для PowerShell
 continuum status         # 5h 86.5% resets at 21:40 + weekly строка
 continuum reset          # HH:MM ресета (+90s, для планировщика)
 continuum estimate       # сколько осталось at this pace

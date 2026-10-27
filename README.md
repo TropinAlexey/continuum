@@ -52,6 +52,7 @@ What the core reads, sends, writes and runs. Each adapter adds its own list, in 
 - **Credentials.** The `anthropic` provider looks for the token in this order: `$CLAUDE_CODE_OAUTH_TOKEN`, the macOS Keychain entry `Claude Code-credentials`, then `~/.claude/.credentials.json`. It goes only to `api.anthropic.com` and is never written anywhere.
 - **Files.** Cache, flags, logs and config go to `~/.local/state/continuum` (see [Configuration](#configuration)). The CLI installer puts the code in `~/.continuum` and a symlink to it on your `PATH`. `continuum doctor` reads `~/.claude/settings.json`, the plugin cache and `~/.junie/extensions` to report; only `doctor --fix` writes, and only the status line copy in `~/.claude/hooks/` and the root pointer in the state directory.
 - **Notifications.** A desktop notification (`osascript` / `notify-send`, or your `CONTINUUM_NOTIFY_CMD`) when a resume run ends and when the limit runs out mid-turn. The text goes to `osascript` as arguments, never as script.
+- **IDE (only `watch --ide`).** Finds the MCP server of a running JetBrains IDE on `127.0.0.1` (the ports its processes listen on, via `lsof`, or `CONTINUUM_IDE_MCP_URL`), writes the warning to `<project>/.git/continuum-warning.md` and asks the IDE to open that file. Nothing else is sent; nothing at all without `--ide`.
 - **Unattended runs.** `continuum resume` starts your agent with nobody watching, using the agent's preset or `CONTINUUM_RESUME_CMD`; inside a bb thread it sends the task to that thread with `bb thread tell` instead. It runs only when you ask for it: by choosing "save and resume", by running the command, or by setting `CONTINUUM_RESUME_ON_LIMIT=1` in advance, which schedules a resume when the limit runs out in the middle of a turn. Keep the task narrow, and don't point it at anything you wouldn't let a stranger merge.
 
 ## What happens
@@ -76,6 +77,7 @@ continuum status      # 5 hours   86.5%   resets at 21:40
 continuum reset       # 21:41   (reset +90s, ready for scheduling)
 continuum estimate    # at this pace, ~2h 15m left
 continuum watch       # poll in a spare pane; bell at threshold
+continuum watch --ide # same, and show the warning in a JetBrains IDE (its AI chat runs no hooks)
 continuum history     # last 20 snapshots taken by `continuum status`
 continuum cleanup     # remove stale flag/cache files (>24h old)
 continuum doctor      # why no warning: provider, plugin enabled, old hooks, stale copies (--fix: safe fixes)
@@ -169,6 +171,7 @@ macOS, Linux, FreeBSD/OpenBSD/NetBSD, Windows (Git Bash or PowerShell). POSIX `s
 | `CONTINUUM_RESUME_CMD` | preset for the agent | Agent command for `resume`. `{prompt}` is the task. Wins over the preset. |
 | `CONTINUUM_RESUME_ON_LIMIT` | off | `1`: when the limit runs out mid-turn (`StopFailure`), schedule a resume for the reset with the agent's preset. Only for a reset within 24 h; one per directory per window. Consent given in advance. |
 | `CONTINUUM_NOTIFY_CMD` | `osascript` / `notify-send` | Replace the desktop notifier; gets title and message as two arguments. |
+| `CONTINUUM_IDE_MCP_URL` | found via `lsof` | The JetBrains IDE MCP endpoint for `watch --ide`, e.g. `http://127.0.0.1:64342/stream`. |
 | `CONTINUUM_DRY_RUN` | — | `resume` prints the plan instead of scheduling it. |
 | `CONTINUUM_OFF` | — | Turns the warning off (`continuum check` and every adapter hook). |
 | `CONTINUUM_FRUGAL` | — | `1` = frugal mode: adapters that can, block subagent calls. |
@@ -284,7 +287,7 @@ The adapter is a plugin, [`adapters/opencode/continuum.js`](adapters/opencode/RE
 
 ## Junie (JetBrains)
 
-Junie CLI installs Claude Code plugins as extensions and runs their hooks, so continuum works in it as is: in Junie, `/extensions`, add the marketplace `https://github.com/TropinAlexey/continuum`, install `continuum`. The Claude Code adapter recognizes Junie by its events (`project_path`, no `transcript_path`): the warning asks Junie to end its final message with a question (it has no question tool), the mid-turn check runs on `PreToolUse` (Junie has no `PostToolUse`), and Claude Code's settings are left alone. Resume preset: `junie --skip-update-check --resume --task "<task>"`. In the IDE (RustRover, IntelliJ IDEA, Rider, …) you pick the chat's agent; Junie there runs through ACP, which does not call hooks yet, and other chat agents are not checked yet: use Junie CLI or Claude Code in the IDE's terminal, or `continuum watch`. See [`adapters/junie/`](adapters/junie/README.md).
+Junie CLI installs Claude Code plugins as extensions and runs their hooks, so continuum works in it as is: in Junie, `/extensions`, add the marketplace `https://github.com/TropinAlexey/continuum`, install `continuum`. The Claude Code adapter recognizes Junie by its events (`project_path`, no `transcript_path`): the warning asks Junie to end its final message with a question (it has no question tool), the mid-turn check runs on `PreToolUse` (Junie has no `PostToolUse`), and Claude Code's settings are left alone. Resume preset: `junie --skip-update-check --resume --task "<task>"`. In the IDE (RustRover, IntelliJ IDEA, Rider, …) you pick the chat's agent; Junie there runs through ACP, which does not call hooks yet, and other chat agents are not checked yet: use Junie CLI or Claude Code in the IDE's terminal, or `continuum watch --ide`, which shows the warning in the IDE through its MCP server (enable it in Settings | Tools | MCP Server). See [`adapters/junie/`](adapters/junie/README.md).
 
 ## bb
 
@@ -293,8 +296,8 @@ bb is a desktop app that runs agents in threads, so the warning comes from the a
 ## Contributing
 
 ```
-sh tests/run.sh          # 213 tests, mock provider, no network (also passes under dash)
-pwsh tests/run.ps1       # 171 tests, the same suite for PowerShell
+sh tests/run.sh          # 220 tests, mock provider, no network (also passes under dash)
+pwsh tests/run.ps1       # 176 tests, the same suite for PowerShell
 ```
 
 Every `.sh` change has a matching `.ps1` change, with tests in both suites. Help is welcome with a provider for another budget (OpenAI, Gemini: see [docs/writing-a-provider.md](docs/writing-a-provider.md)) and an adapter for another agent ([docs/harnesses.md](docs/harnesses.md)).

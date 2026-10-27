@@ -44,7 +44,9 @@ ACP bridge loads the agent's own hooks; not checked yet. What works for sure:
 - Junie CLI in the IDE's terminal: everything above.
 - Claude Code in the IDE's terminal (with the Claude Code JetBrains plugin or without):
   the regular [Claude Code](../../README.md#claude-code) setup.
-- `continuum watch` in a terminal tab, for any agent.
+- `continuum watch --ide` in a terminal tab: when the threshold is crossed, it writes the
+  warning to `<project>/.git/continuum-warning.md` and opens it in the IDE through the IDE's
+  MCP server (Settings | Tools | MCP Server must be on). Run live in Rider 2026.2.
 
 ## Status
 

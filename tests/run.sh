@@ -380,6 +380,32 @@ cmp -s "$dr/claude/settings.json" "$dr/settings.before" && ok "doctor --fix neve
 rm -rf "$dr/junie/extensions"
 check "doctor: no Junie extension is a skip" "skip Junie" "$(doc)"
 
+echo "watch --ide (JetBrains MCP):"
+# The transport is a stub that records each JSON-RPC call and answers like the IDE.
+ide_stub="$TMP/ide_stub.sh"
+cat > "$ide_stub" <<'STUB'
+#!/bin/sh
+printf '%s %s\n' "$2" "$3" >> "$IDE_LOG"
+case "$3" in
+  *'"initialize"'*) printf 'sid-1\n{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"RustRover MCP Server"}}}\n' ;;
+  *'tools/call'*)   printf 'sid-1\n{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"[success]"}]}}\n' ;;
+  *)                printf 'sid-1\n\n' ;;
+esac
+STUB
+chmod +x "$ide_stub"
+ide_repo="$TMP/ide_repo"; mkdir -p "$ide_repo"; git -C "$ide_repo" init -q
+iw() { d=$1; shift; (cd "$d" && IDE_LOG="$TMP/ide.log" CONTINUUM_IDE_MCP_CMD="$ide_stub" CONTINUUM_IDE_MCP_URL=http://127.0.0.1:1/stream sh "$ROOT/bin/continuum" watch "$@" 2>&1); }
+: > "$TMP/ide.log"; out=$(iw "$ide_repo" --ide 1)
+check "watch --ide still prints the warning"   "continuum: 86% used" "$out"
+check "watch --ide writes the warning file"    "86% of the usage window used" "$(cat "$ide_repo/.git/continuum-warning.md" 2>/dev/null)"
+check "watch --ide opens it in the IDE"        '"name":"open_file_in_editor","arguments":{"filePath":".git/continuum-warning.md","rootFolder":"' "$(cat "$TMP/ide.log")"
+check "watch --ide reuses the MCP session"     "sid-1 {\"jsonrpc\":\"2.0\",\"id\":2" "$(cat "$TMP/ide.log")"
+[ -z "$(git -C "$ide_repo" status --porcelain)" ] && ok "watch --ide leaves git status clean" || bad "watch --ide leaves git status clean" "$(git -C "$ide_repo" status --porcelain)"
+: > "$TMP/ide.log"; iw "$ide_repo" 1 >/dev/null || true
+[ ! -s "$TMP/ide.log" ] && ok "watch without --ide sends nothing to the IDE" || bad "watch without --ide sends nothing to the IDE" "$(cat "$TMP/ide.log")"
+mkdir -p "$TMP/ide_nogit"; out=$(iw "$TMP/ide_nogit" --ide 1)
+check "watch --ide outside git says why" "needs a git checkout" "$out"
+
 echo "limit hit mid-turn (StopFailure):"
 # rate_limit -> log line, notification, note for the next start; never a resume
 # unless CONTINUUM_RESUME_ON_LIMIT=1. The notifier is swapped for a recorder.

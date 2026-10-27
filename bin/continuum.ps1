@@ -24,7 +24,9 @@ param(
     [string]$Session,
     [string]$Agent,
     # `doctor --fix` binds here under `pwsh -File`, positionally in-process.
-    [switch]$Fix
+    [switch]$Fix,
+    # `watch --ide`, the same way.
+    [switch]$Ide
 )
 
 # param() must be the first statement in the file - everything else comes after.
@@ -440,8 +442,69 @@ function Invoke-LimitHit {
 
 # Harness-independent fallback: no hooks, no plugin, works with any agent in any
 # shell. Poll until the threshold is crossed, say so, exit. Run it in a spare pane.
+# JetBrains IDE (R1), mirrors `watch --ide` in bin/continuum: the AI chat runs agents
+# through ACP, where no hooks fire, so an outside poller shows the warning in the IDE
+# through its MCP server. The IDE opens only files inside an open project, so the text
+# goes to <project>/.git/continuum-warning.md: never tracked, never in `git status`.
+function Get-CntIdeEndpoints {
+    if ($env:CONTINUUM_IDE_MCP_URL) { return @($env:CONTINUUM_IDE_MCP_URL) }
+    $names = 'rider|rustrover|idea|pycharm|goland|webstorm|clion|phpstorm|rubymine|datagrip|aqua|dataspell'
+    $ports = @()
+    if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
+        $ids = @(Get-Process | Where-Object { $_.ProcessName -match "^($names)" } | ForEach-Object { $_.Id })
+        if ($ids) {
+            $ports = @(Get-NetTCPConnection -State Listen -LocalAddress 127.0.0.1 -ErrorAction SilentlyContinue |
+                Where-Object { $ids -contains $_.OwningProcess } | ForEach-Object { $_.LocalPort })
+        }
+    } elseif (Get-Command lsof -ErrorAction SilentlyContinue) {
+        $ports = @(& lsof -nP -iTCP -sTCP:LISTEN 2>$null | ForEach-Object {
+            $f = $_ -split '\s+'
+            if ($f.Count -ge 9 -and $f[0].ToLower() -match "^($names)" -and $f[8] -match '^127\.0\.0\.1:(\d+)$') { $Matches[1] }
+        })
+    }
+    return @($ports | Sort-Object -Unique | ForEach-Object { "http://127.0.0.1:$_/stream" })
+}
+
+# Returns @(sessionId, body). CONTINUUM_IDE_MCP_CMD replaces the transport (tests).
+function Invoke-CntIdeRpc ($Url, $Sid, $Json) {
+    if ($env:CONTINUUM_IDE_MCP_CMD) {
+        $parts = @($env:CONTINUUM_IDE_MCP_CMD -split '\s+' | Where-Object { $_ })
+        $rest = @($parts | Select-Object -Skip 1)
+        $out = @(& $parts[0] @rest $Url $Sid $Json)
+        return @($out[0], (@($out | Select-Object -Skip 1) -join "`n"))
+    }
+    $h = @{ 'Accept' = 'application/json, text/event-stream' }
+    if ($Sid) { $h['Mcp-Session-Id'] = $Sid }
+    $r = Invoke-WebRequest -Uri $Url -Method Post -Body $Json -ContentType 'application/json' -Headers $h -TimeoutSec 5 -UseBasicParsing
+    $newSid = $Sid
+    if ($r.Headers['Mcp-Session-Id']) { $newSid = @($r.Headers['Mcp-Session-Id'])[0] }
+    return @($newSid, ([string]$r.Content -replace '(?m)^data: ', ''))
+}
+
+function Show-CntIde ($Text, $Dir) {
+    $top = (& git -C $Dir rev-parse --show-toplevel 2>$null)
+    if (-not $top -or -not (Test-Path -PathType Container (Join-Path $top '.git'))) {
+        [Console]::Error.WriteLine('continuum: --ide needs a git checkout (the warning goes to .git/continuum-warning.md)'); return $false
+    }
+    [System.IO.File]::WriteAllText((Join-Path $top '.git/continuum-warning.md'), $Text + "`n")
+    $jtop = $top.Replace('\', '\\').Replace('"', '\"')
+    foreach ($url in Get-CntIdeEndpoints) {
+        try {
+            $r = Invoke-CntIdeRpc $url '' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"continuum","version":"1"}}}'
+            if ($r[1] -notmatch 'MCP Server') { continue }
+            $sid = $r[0]
+            try { Invoke-CntIdeRpc $url $sid '{"jsonrpc":"2.0","method":"notifications/initialized"}' | Out-Null } catch {}
+            $r = Invoke-CntIdeRpc $url $sid ('{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open_file_in_editor","arguments":{"filePath":".git/continuum-warning.md","rootFolder":"' + $jtop + '"}}}')
+            if ($r[1] -match '"isError"\s*:\s*true|"error"\s*:') { continue }
+            if ($r[1] -match '"result"') { return $true }
+        } catch { continue }
+    }
+    [Console]::Error.WriteLine("continuum: no JetBrains IDE with $top open answered on MCP (Settings | Tools | MCP Server)")
+    return $false
+}
+
 function Invoke-Watch {
-    param([int]$Every = 300)
+    param([int]$Every = 300, [switch]$ShowInIde)
 
     $threshold = 80
     if ($env:CONTINUUM_THRESHOLD) { $threshold = [int]$env:CONTINUUM_THRESHOLD }
@@ -460,6 +523,10 @@ function Invoke-Watch {
                 }
                 Write-Host "`acontinuum: $utilInt% used, resets at $when"
                 Write-Host "Wrap up, or: continuum resume $at `"`$PWD`" `"<task>`""
+                if ($ShowInIde) {
+                    $text = "# continuum: $utilInt% of the usage window used`n`nResets at $when. Tell the agent in the chat to wrap up, or to save its state, then:`n`n    continuum resume $at `"`$PWD`" `"<the task to pick up>`"`n`n(Shown by ``continuum watch --ide``. This file lives in .git/ and is never committed.)"
+                    Show-CntIde $text (Get-Location).Path | Out-Null
+                }
                 return
             }
             Write-Host "continuum: $utilInt% used, below $threshold%"
@@ -666,7 +733,11 @@ switch ($Command) {
     'providers' { Get-CntProviders }
     'check'     { Invoke-Check @($Arg1, $Arg2, $Arg3, $Arg4) $Session $Agent }
     'limit-hit' { Invoke-LimitHit $Arg1 $Arg2 $Arg3 }
-    'watch'     { if ($Arg1) { Invoke-Watch ([int]$Arg1) } else { Invoke-Watch } }
+    'watch'     {
+        $ideOn = $Ide -or ($Arg1 -eq '--ide') -or ($Arg2 -eq '--ide')
+        $sec = @($Arg1, $Arg2 | Where-Object { $_ -and $_ -ne '--ide' }) | Select-Object -First 1
+        if ($sec) { Invoke-Watch ([int]$sec) -ShowInIde:$ideOn } else { Invoke-Watch -ShowInIde:$ideOn }
+    }
     'resume'    { Invoke-Resume $Arg1 $Arg2 $Arg3 }
     'history'   { Invoke-CntHistory }
     'cleanup'   { Invoke-Cleanup }

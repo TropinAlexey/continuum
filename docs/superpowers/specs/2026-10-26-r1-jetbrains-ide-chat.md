@@ -1,6 +1,6 @@
 # R1. Warning in a JetBrains IDE's AI chat
 
-Status: in progress (research done; R1.1 matrix needs RustRover running and a Claude window with room)
+Status: in progress (R1.3 + R1.4 done; R1.1/R1.2 for Claude Agent and Codex in the chat need RustRover open and a Claude window with room)
 Date: 2026-10-26
 Roadmap: [2026-10-26-roadmap.md](2026-10-26-roadmap.md)
 
@@ -54,6 +54,12 @@ Research (2026-10-27):
 - Next: with RustRover open, fill R1.1 for Claude Agent / Codex in the chat; if their ACP
   bridges run the user's hooks (likely for Claude Agent: Agent SDK with user settings, as in
   bb), R1.3 is needed only for Junie.
+
+Implemented (R1.3, R1.4): `continuum watch --ide` (sh + ps1). Endpoints: `CONTINUUM_IDE_MCP_URL`,
+else loopback ports of JetBrains IDE processes (`lsof`; `Get-NetTCPConnection` on Windows),
+each probed with `initialize` and kept only if `serverInfo` says "MCP Server". The IDE refuses
+files outside an open project, so the file is `<project>/.git/continuum-warning.md`. Transport
+swappable (`CONTINUUM_IDE_MCP_CMD`). Run live in Rider 2026.2 from both sh and ps1.
 
 ## Acceptance
 

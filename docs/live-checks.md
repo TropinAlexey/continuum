@@ -12,6 +12,7 @@ JetBrains IDE's AI chat).
 | Junie CLI, batch | 26.10.20 | 2026-10-27 | yes | yes (`PreToolUse`, nested `hookSpecificOutput.additionalContext` accepted) | yes, a question with options at the end of the final message (no question tool) | `junie --resume --task` continued the same session headless (2026-10-26) | full `hooks/hooks.json` via `--config-location`, installed extensions off (`--extensions-default-location` = empty dir) |
 | Junie CLI, interactive TUI | 26.10.20 | — | not run | not run | — | — | needs an interactive terminal; same hooks as batch per Junie docs |
 | Junie in a JetBrains IDE chat (ACP) | — | — | no hooks | no hooks | — | — | Junie's ACP host calls no hooks (Junie docs, "Hooks → Limitations"); R1 |
+| Any agent in a JetBrains IDE chat, via `continuum watch --ide` | Rider 2026.2 | 2026-10-27 | shown in the IDE (file opened in the editor, sh and ps1) | — | no (the agent is not told; you are) | — | endpoint found via `lsof`, file `.git/continuum-warning.md`, `git status` clean |
 | bb (Claude thread) | 0.47.1 | — | not run | not run | — | — | a bb thread runs Claude Code; postponed until the Claude usage window resets |
 | opencode | 2.1.4 | — | not run | not run | — | — | only paid OpenRouter / xAI models configured here |
 | Codex CLI | — | — | not run | not run | — | — | not installed here |
