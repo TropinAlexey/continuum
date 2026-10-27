@@ -1,6 +1,6 @@
 # R1. Warning in a JetBrains IDE's AI chat
 
-Status: agreed
+Status: in progress (research done; R1.1 matrix needs RustRover running and a Claude window with room)
 Date: 2026-10-26
 Roadmap: [2026-10-26-roadmap.md](2026-10-26-roadmap.md)
 
@@ -40,6 +40,20 @@ CONTINUUM_TIERS=10`, mock provider. MCP: `initialize` → `notifications/initial
 initialized"). Known tools so far: editor, terminal, files, run configs, tool windows; no
 notification tool seen yet. R1.3 lives in `adapters/jetbrains/` if it goes ahead; the port
 lookup must not scan all ports blindly (R1.4).
+
+Research (2026-10-27):
+- The IDE MCP server is stateful (`initialize` → `Mcp-Session-Id` → `tools/list`) and its
+  port changes when the IDE restarts (Rider moved off 64482), so R1.4 discovery is required.
+- No notification tool among the IDE's MCP tools. Visible options: `open_file_in_editor`
+  (open a file with the warning text) and `execute_terminal_command` (too intrusive: runs a
+  command in the user's IDE terminal; rejected).
+- In the IDE chat (ACP) no hooks fire for Junie, so nothing inside the agent can call the
+  MCP server. R1.3 therefore means an outside poller: `continuum watch --ide` that, on a new
+  tier, writes the warning to `$CNT_STATE/WARNING.md` and opens it via `open_file_in_editor`.
+  It only shows; it cannot make the chat agent ask (the "decide" part stays with the user).
+- Next: with RustRover open, fill R1.1 for Claude Agent / Codex in the chat; if their ACP
+  bridges run the user's hooks (likely for Claude Agent: Agent SDK with user settings, as in
+  bb), R1.3 is needed only for Junie.
 
 ## Acceptance
 
