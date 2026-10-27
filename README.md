@@ -305,7 +305,7 @@ bb is a desktop app that runs agents in threads, so the warning comes from the a
 ## Contributing
 
 ```
-sh tests/run.sh          # 253 tests, mock provider, no network (also passes under dash)
+sh tests/run.sh          # 254 tests, mock provider, no network (also passes under dash)
 pwsh tests/run.ps1       # 196 tests, the same suite for PowerShell
 ```
 

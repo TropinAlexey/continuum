@@ -414,6 +414,14 @@ for pv in openrouter anthropic spend; do
     fi
 done
 
+echo "repo hygiene:"
+# install.sh chmods these after a git clone; a file without the x bit in git then shows as
+# locally modified and blocks the installer's next `git pull --ff-only`.
+if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    nx=$(git -C "$ROOT" ls-files -s bin/continuum 'hooks/*.sh' 'adapters/*/*.sh' 'providers/*.sh' | awk '$1 != "100755" { print $4 }')
+    [ -z "$nx" ] && ok "scripts the installer chmods are executable in git" || bad "scripts the installer chmods are executable in git" "$nx"
+fi
+
 echo "install --agent:"
 ih="$TMP/ih"; mkdir -p "$ih"
 ci() { HOME="$ih" CONTINUUM_STATE_DIR="$ih/st" XDG_CONFIG_HOME="$ih/.config" CODEX_HOME="$ih/.codex" sh "$ROOT/bin/continuum" "$@" 2>&1; }
