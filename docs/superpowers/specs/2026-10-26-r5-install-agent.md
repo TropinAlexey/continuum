@@ -1,6 +1,6 @@
 # R5. `continuum install --agent <x>`
 
-Status: done (local, not released)
+Status: done (v0.8.0)
 Date: 2026-10-26
 Roadmap: [2026-10-26-roadmap.md](2026-10-26-roadmap.md)
 
