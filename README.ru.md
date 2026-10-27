@@ -49,7 +49,7 @@ irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | 
 Что ядро читает, отправляет, пишет и запускает. Каждый адаптер добавляет свой список — в своём разделе ниже.
 
 - **Сеть.** В сеть ходит только провайдер. Провайдер по умолчанию, `anthropic`, делает один `GET https://api.anthropic.com/api/oauth/usage` с OAuth-токеном в заголовке `Authorization`. Это **недокументированный эндпоинт**, не публичный API, и он может измениться. Ответ кэшируется на 10 минут. Необязательный провайдер `spend` обращается к `https://api.anthropic.com/v1/billing/usage` с `ANTHROPIC_ADMIN_KEY`. Больше ничего с машины не уходит.
-- **Учётные данные.** Провайдер `anthropic` ищет токен в таком порядке: `$CLAUDE_CODE_OAUTH_TOKEN`, запись `Claude Code-credentials` в Keychain macOS, затем `~/.claude/.credentials.json`. Он уходит только на `api.anthropic.com` и нигде не сохраняется.
+- **Учётные данные.** Провайдер `anthropic` ищет токен в таком порядке: `$CLAUDE_CODE_OAUTH_TOKEN`, запись `Claude Code-credentials` в Keychain macOS, затем `~/.claude/.credentials.json`. Он уходит только на `api.anthropic.com` и нигде не сохраняется. Провайдер `openrouter` отправляет `OPENROUTER_API_KEY` только на `openrouter.ai` (`GET /api/v1/key`) и не читает других файлов с учётными данными.
 - **Файлы.** Кэш, флаги, логи и конфиг лежат в `~/.local/state/continuum` (см. [Настройка](#настройка)). CLI-инсталлятор кладёт код в `~/.continuum`, а символическую ссылку на него — в каталог из `PATH`. `continuum doctor` читает `~/.claude/settings.json`, кэш плагина и `~/.junie/extensions` только для отчёта; пишет лишь `doctor --fix`, и только копию статус-бара в `~/.claude/hooks/` и указатель на код в каталоге состояния.
 - **Уведомления.** Уведомление на рабочий стол (`osascript` / `notify-send` или твой `CONTINUUM_NOTIFY_CMD`), когда запуск resume закончился и когда лимит кончился посреди хода. Текст уходит в `osascript` аргументами, а не как скрипт.
 - **Конфиги агентов (только `continuum install --agent <x>`).** Пишет хуки адаптера в `~/.codex/hooks.json`, `~/.gemini/settings.json` или `~/.cursor/hooks.json` (сначала копия `<файл>.continuum-bak`; файл, где уже есть `"hooks"`, не трогает) или ставит симлинк плагина opencode в `~/.config/opencode/plugins/`. `continuum uninstall --agent <x>` откатывает, пока файл не менялся.
@@ -154,6 +154,8 @@ continuum всё равно, откуда берутся цифры. Он спр
 
 Провайдер — это скрипт, который печатает `5h 86.5 1783000000`, и это весь интерфейс. Свой можно написать за 10 минут: [docs/writing-a-provider.md](docs/writing-a-provider.md).
 
+В комплекте: `anthropic` (окно подписки Claude, по умолчанию), `spend` (расходы Anthropic API против `CONTINUUM_SPEND_CAP`), `openrouter` (ключ OpenRouter: его лимит и график сброса через документированный `GET /api/v1/key`, ключ только из `OPENROUTER_API_KEY`; ключу без лимита нужен `CONTINUUM_OPENROUTER_CAP` в долларах), `mock` (тесты).
+
 **Несколько провайдеров:** `CONTINUUM_PROVIDER=anthropic,spend` запускает оба и берёт наибольшее использование. Пробелы вокруг запятой допустимы.
 
 ## Платформы
@@ -174,6 +176,7 @@ macOS, Linux, FreeBSD/OpenBSD/NetBSD, Windows (Git Bash или PowerShell). POSI
 | `CONTINUUM_RESUME_ON_LIMIT` | выкл. | `1`: когда лимит кончился посреди хода (`StopFailure`), запланировать resume на сброс по пресету агента. Только если сброс в ближайшие 24 ч; один на каталог за окно. Согласие заранее. |
 | `CONTINUUM_NOTIFY_CMD` | `osascript` / `notify-send` | Заменить уведомлялку; получает заголовок и текст двумя аргументами. |
 | `CONTINUUM_IDE_MCP_URL` | ищется через `lsof` | MCP-эндпоинт JetBrains IDE для `watch --ide`, например `http://127.0.0.1:64342/stream`. |
+| `CONTINUUM_OPENROUTER_CAP` | — | Бюджет в долларах для провайдера `openrouter`, если у ключа нет лимита. Ключ: `OPENROUTER_API_KEY`. |
 | `CONTINUUM_DRY_RUN` | — | `resume` печатает план вместо планирования. |
 | `CONTINUUM_OFF` | — | Отключает предупреждение (`continuum check` и все хуки адаптеров). |
 | `CONTINUUM_FRUGAL` | — | `1` = экономный режим: адаптеры, которые умеют, блокируют вызовы субагентов. |
@@ -298,8 +301,8 @@ bb — десктоп-приложение, которое запускает а
 ## Участие
 
 ```
-sh tests/run.sh          # 241 тест, mock-провайдер, без сети (проходит и под dash)
-pwsh tests/run.ps1       # 191 тест, та же сюита для PowerShell
+sh tests/run.sh          # 250 тестов, mock-провайдер, без сети (проходит и под dash)
+pwsh tests/run.ps1       # 196 тестов, та же сюита для PowerShell
 ```
 
 Каждая правка `.sh` дублируется в `.ps1`, с тестами в обе сюиты. Пригодится помощь с провайдером для другого бюджета (OpenAI, Gemini: см. [docs/writing-a-provider.md](docs/writing-a-provider.md)) и с адаптером для другого агента ([docs/harnesses.md](docs/harnesses.md)).

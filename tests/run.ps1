@@ -444,6 +444,29 @@ if ($script:docRc -eq 1) { Ok "doctor: a fail exits 1" } else { Bad "doctor: a f
 if ((Get-Content -Raw (Join-Path $dr 'claude/settings.json')) -eq $before) { Ok "doctor --fix never edits settings.json" } else { Bad "doctor --fix never edits settings.json" "changed" }
 $env:CONTINUUM_STATE_DIR = Join-Path $tmp 'state'
 
+Write-Host "provider openrouter (recorded responses):"
+$orr = Join-Path $tmp 'or'
+$orCases = @{ m = '{"data":{"label":"x","usage":12.5,"limit":50,"limit_remaining":37.5,"limit_reset":"monthly"}}'; d = '{"data":{"usage":9,"limit":10,"limit_remaining":1,"limit_reset":"daily"}}'; n = '{"data":{"usage":3,"limit":null,"limit_remaining":null,"limit_reset":null}}' }
+foreach ($k in $orCases.Keys) { $dd = Join-Path $orr $k; New-Item -ItemType Directory -Force -Path $dd | Out-Null; Set-Content -Path (Join-Path $dd 'key') -Value $orCases[$k] }
+function Orp ($case) {
+    $env:OPENROUTER_API_KEY = 'k'; $pp = (Join-Path $orr $case) -replace '\\', '/'; if (-not $pp.StartsWith('/')) { $pp = '/' + $pp }; $env:OPENROUTER_API_BASE = 'file://' + $pp
+    $o = & pwsh -NoProfile -File (Join-Path $root 'providers/openrouter.ps1') 2>&1
+    $script:orRc = $LASTEXITCODE
+    Remove-Item Env:OPENROUTER_API_KEY, Env:OPENROUTER_API_BASE -ErrorAction SilentlyContinue
+    return ($o -join "`n")
+}
+Check "openrouter monthly limit" 'month 25.0 ' (Orp 'm')
+Check "openrouter daily limit" 'day 90.0 ' (Orp 'd')
+$out = Orp 'n'
+if ($script:orRc -ne 0 -and $out -match 'CONTINUUM_OPENROUTER_CAP') { Ok "openrouter without a limit or cap fails" } else { Bad "openrouter without a limit or cap fails" $out }
+$env:CONTINUUM_OPENROUTER_CAP = '10'
+Check "openrouter cap for a key without a limit" 'key 30.0 -' (Orp 'n')
+Remove-Item Env:CONTINUUM_OPENROUTER_CAP
+$env:OPENROUTER_API_KEY = 'k'; $env:OPENROUTER_API_BASE = 'http://example.com'
+$out = (& pwsh -NoProfile -File (Join-Path $root 'providers/openrouter.ps1') 2>&1) -join "`n"
+if ($LASTEXITCODE -ne 0 -and $out -match 'must be https://') { Ok "openrouter refuses a non-https base" } else { Bad "openrouter refuses a non-https base" $out }
+Remove-Item Env:OPENROUTER_API_KEY, Env:OPENROUTER_API_BASE
+
 Write-Host "install --agent:"
 $ih = Join-Path $tmp 'ih'; New-Item -ItemType Directory -Force -Path $ih | Out-Null
 function Ci {

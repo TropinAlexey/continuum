@@ -49,7 +49,7 @@ The install scripts are short, so read [install.sh](install.sh) / [install.ps1](
 What the core reads, sends, writes and runs. Each adapter adds its own list, in its section below.
 
 - **Network.** Only the provider talks to the network. The default `anthropic` provider makes one `GET https://api.anthropic.com/api/oauth/usage` with an OAuth token in the `Authorization` header. This is an **undocumented endpoint**, not a public API, and it may change. The result is cached for 10 minutes. The optional `spend` provider calls `https://api.anthropic.com/v1/billing/usage` with `ANTHROPIC_ADMIN_KEY`. Nothing else leaves the machine.
-- **Credentials.** The `anthropic` provider looks for the token in this order: `$CLAUDE_CODE_OAUTH_TOKEN`, the macOS Keychain entry `Claude Code-credentials`, then `~/.claude/.credentials.json`. It goes only to `api.anthropic.com` and is never written anywhere.
+- **Credentials.** The `anthropic` provider looks for the token in this order: `$CLAUDE_CODE_OAUTH_TOKEN`, the macOS Keychain entry `Claude Code-credentials`, then `~/.claude/.credentials.json`. It goes only to `api.anthropic.com` and is never written anywhere. The `openrouter` provider sends `OPENROUTER_API_KEY` only to `openrouter.ai` (`GET /api/v1/key`) and reads no other credential files.
 - **Files.** Cache, flags, logs and config go to `~/.local/state/continuum` (see [Configuration](#configuration)). The CLI installer puts the code in `~/.continuum` and a symlink to it on your `PATH`. `continuum doctor` reads `~/.claude/settings.json`, the plugin cache and `~/.junie/extensions` to report; only `doctor --fix` writes, and only the status line copy in `~/.claude/hooks/` and the root pointer in the state directory.
 - **Notifications.** A desktop notification (`osascript` / `notify-send`, or your `CONTINUUM_NOTIFY_CMD`) when a resume run ends and when the limit runs out mid-turn. The text goes to `osascript` as arguments, never as script.
 - **Agent configs (only `continuum install --agent <x>`).** Writes the adapter's hooks into `~/.codex/hooks.json`, `~/.gemini/settings.json` or `~/.cursor/hooks.json` (a backup `<file>.continuum-bak` first, refuses files that already have `"hooks"`), or links the opencode plugin into `~/.config/opencode/plugins/`. `continuum uninstall --agent <x>` undoes it while the file is unchanged.
@@ -154,6 +154,8 @@ continuum doesn't care where the numbers come from. It only asks how much of the
 
 A provider is a script that prints `5h 86.5 1783000000`, and that is the entire interface. You can write your own in 10 minutes: [docs/writing-a-provider.md](docs/writing-a-provider.md).
 
+Bundled: `anthropic` (the Claude subscription window, default), `spend` (Anthropic API spend against `CONTINUUM_SPEND_CAP`), `openrouter` (an OpenRouter key: its limit and reset schedule via the documented `GET /api/v1/key`, key from `OPENROUTER_API_KEY` only; a key without a limit needs `CONTINUUM_OPENROUTER_CAP` in dollars), `mock` (tests).
+
 **Several providers:** `CONTINUUM_PROVIDER=anthropic,spend` runs both and takes the highest usage. Spaces around the comma are fine.
 
 ## Platforms
@@ -174,6 +176,7 @@ macOS, Linux, FreeBSD/OpenBSD/NetBSD, Windows (Git Bash or PowerShell). POSIX `s
 | `CONTINUUM_RESUME_ON_LIMIT` | off | `1`: when the limit runs out mid-turn (`StopFailure`), schedule a resume for the reset with the agent's preset. Only for a reset within 24 h; one per directory per window. Consent given in advance. |
 | `CONTINUUM_NOTIFY_CMD` | `osascript` / `notify-send` | Replace the desktop notifier; gets title and message as two arguments. |
 | `CONTINUUM_IDE_MCP_URL` | found via `lsof` | The JetBrains IDE MCP endpoint for `watch --ide`, e.g. `http://127.0.0.1:64342/stream`. |
+| `CONTINUUM_OPENROUTER_CAP` | — | Budget in dollars for the `openrouter` provider when the key has no limit. Key: `OPENROUTER_API_KEY`. |
 | `CONTINUUM_DRY_RUN` | — | `resume` prints the plan instead of scheduling it. |
 | `CONTINUUM_OFF` | — | Turns the warning off (`continuum check` and every adapter hook). |
 | `CONTINUUM_FRUGAL` | — | `1` = frugal mode: adapters that can, block subagent calls. |
@@ -298,8 +301,8 @@ bb is a desktop app that runs agents in threads, so the warning comes from the a
 ## Contributing
 
 ```
-sh tests/run.sh          # 241 tests, mock provider, no network (also passes under dash)
-pwsh tests/run.ps1       # 191 tests, the same suite for PowerShell
+sh tests/run.sh          # 250 tests, mock provider, no network (also passes under dash)
+pwsh tests/run.ps1       # 196 tests, the same suite for PowerShell
 ```
 
 Every `.sh` change has a matching `.ps1` change, with tests in both suites. Help is welcome with a provider for another budget (OpenAI, Gemini: see [docs/writing-a-provider.md](docs/writing-a-provider.md)) and an adapter for another agent ([docs/harnesses.md](docs/harnesses.md)).

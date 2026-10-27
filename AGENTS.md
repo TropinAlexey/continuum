@@ -45,8 +45,8 @@
 ## Команды
 
 ```sh
-sh tests/run.sh          # 241 тест, mock, без сети (эталон; проходит и под dash)
-pwsh tests/run.ps1       # 191 тест, та же сюита для PowerShell
+sh tests/run.sh          # 250 тестов, mock, без сети (эталон; проходит и под dash)
+pwsh tests/run.ps1       # 196 тестов, та же сюита для PowerShell
 continuum status         # 5h 86.5% resets at 21:40 + weekly строка
 continuum reset          # HH:MM ресета (+90s, для планировщика)
 continuum estimate       # сколько осталось at this pace
@@ -57,6 +57,8 @@ continuum resume "$(continuum reset)" "$PWD" "конкретная задача"
 ```
 
 ## Текущее состояние (2026-10-27)
+
+- **Не выпущено (локальные коммиты после v0.7.4, ждут команды на bump + push):** R1.3 `continuum watch --ide` (предупреждение в JetBrains IDE через её MCP: `.git/continuum-warning.md` + `open_file_in_editor`; проверено вживую в Rider), R5 `continuum install|uninstall --agent codex|gemini|cursor|opencode` (без JSON-парсера: создать / вставить в файл без `"hooks"` с бэкапом / иначе отказ; uninstall по контрольной сумме; симлинки не трогает), R6 провайдер `openrouter` (`GET /api/v1/key`, ключ только из `OPENROUTER_API_KEY`, `CONTINUUM_OPENROUTER_CAP` для ключа без лимита; вживую не проверен — ключа нет), CI: установка PSScriptAnalyzer с повторами (флак PSGallery на Windows). R2 частично (`docs/live-checks.md`), R1.1 ждёт RustRover + свободный лимит Claude. **Тесты: sh 250/250 (и под dash), ps 196/196.**
 
 - **v0.7.4 — R3 `continuum doctor [--fix]`** (спека `…/2026-10-26-r3-doctor.md`): ok/warn/fail/skip по строке, exit 1 только на fail. Провайдер, каталог состояния, указатель на код, плагин в `enabledPlugins`, старые хуки (`token-budget-check.sh`, `.claude/lib/usage.sh`, `hooks/continuum-check.*`), копия statusline, **версия плагина, которую реально запускает Claude Code** (`~/.claude/plugins/cache/continuum/continuum/<ver>`), версия расширения Junie. `--fix` — только копия statusline и указатель; `settings.json` не трогает. На этой машине сразу показал: плагин и Junie на 0.7.0. Секьюрити-автофикс (находка автоматического ревью): значения в plist launchd не XML-экранировались — каталог `x</string></array><key>Program</key>…` перестраивал задание; теперь экранирование поверх shell-квотинга + тест на macOS (`plutil`). В `.ps1` экранирован путь pid-файла вейклока. **Тесты: sh 213/213 (и под dash), ps 171/171.**
 
