@@ -233,6 +233,10 @@ function Start-CntWakeLock {
         if ($p) {
             try { Set-Content -Path $pidFile -Value $p.Id -NoNewline -ErrorAction Stop }
             catch { Stop-Process -InputObject $p -ErrorAction SilentlyContinue; return '' }
+            # systemd-inhibit exits at once where logind refuses (CI runners, containers):
+            # then there is no wakelock, and saying "sleep inhibited" would be a lie.
+            Start-Sleep -Milliseconds 300
+            if ($p.HasExited) { Remove-Item -Force $pidFile -ErrorAction SilentlyContinue; return '' }
         }
         else { return '' }
     } else { return '' }

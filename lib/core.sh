@@ -259,6 +259,10 @@ cnt_wakelock_start() {
             printf '%s' "$!" > "$_wl_pf" ;;
         *) return 0 ;;
     esac
+    # systemd-inhibit exits at once where logind refuses (CI runners, containers): then
+    # there is no wakelock, and saying "sleep inhibited" would be a lie.
+    sleep 0.3 2>/dev/null || sleep 1
+    if ! kill -0 "$(cat "$_wl_pf" 2>/dev/null)" 2>/dev/null; then rm -f "$_wl_pf"; return 0; fi
     printf '%s' "$_wl_pf"
 }
 
