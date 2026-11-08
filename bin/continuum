@@ -163,6 +163,16 @@ cmd_resume() {
     mkdir -p "$CNT_STATE" 2>/dev/null || true
     printf '\n=== scheduled %s for %s in %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$T" "$DIR" >> "$LOG"
 
+    # Write pending resume file so SessionStart can pick it up after compaction/new session.
+    # Format: dir|scheduled_epoch|prompt|agent|scheduler_info
+    pending_dir_hash=$(printf '%s' "$DIR" | cksum | cut -d' ' -f1)
+    pending_file="$CNT_STATE/.continuum-pending-resume-$pending_dir_hash"
+    fire_epoch=$(( $(date +%s) + delay ))
+    # scheduler_info: label for launchd, unit for systemd, pid for daemon/nohup
+    scheduler_info=""
+    # We'll update this after scheduling succeeds
+    printf '%s|%s|%s|%s|%s\n' "$DIR" "$fire_epoch" "$PROMPT" "${CONTINUUM_AGENT:-claude}" "$scheduler_info" > "$pending_file" 2>/dev/null || true
+
     # The wrapper that runs after the delay: header/footer in the log so concurrent
     # resumes across projects stay attributable, plus a desktop notification with exit
     # status since nothing else is watching a process that runs unattended for hours.
@@ -225,6 +235,8 @@ cmd_resume() {
 PLIST
             if launchctl load "$plist" 2>/dev/null; then
                 scheduled=true
+                # Update pending file with scheduler info
+                printf '%s|%s|%s|%s|%s\n' "$DIR" "$fire_epoch" "$PROMPT" "${CONTINUUM_AGENT:-claude}" "launchd:$label" > "$pending_file" 2>/dev/null || true
                 printf 'Resuming at %s in %s: "%s"\n' "$T" "$DIR" "$PROMPT"
                 printf 'Scheduled via launchd (survives reboot). Label: %s\n' "$label"
                 printf 'Sleep inhibited (caffeinate).\n'
@@ -232,6 +244,8 @@ PLIST
             else
                 rm -f "$plist"
                 [ -n "$wl_pidfile" ] && cnt_wakelock_stop "$wl_pidfile"
+                # Remove pending file on failure
+                rm -f "$pending_file" 2>/dev/null || true
             fi
         fi
     elif [ "$(uname)" = "FreeBSD" ] && command -v daemon >/dev/null 2>&1; then
@@ -240,6 +254,9 @@ PLIST
         daemon -p "$CNT_STATE/.continuum-daemon.pid" sh -c "$wrapper_script"
         pid=$(cat "$CNT_STATE/.continuum-daemon.pid" 2>/dev/null || echo "?")
         scheduled=true
+        # Update pending file with scheduler info
+        fire_epoch=$(( $(date +%s) + delay ))
+        printf '%s|%s|%s|%s|%s\n' "$DIR" "$fire_epoch" "$PROMPT" "${CONTINUUM_AGENT:-claude}" "daemon:$pid" > "$pending_file" 2>/dev/null || true
         printf 'Resuming in %s min (at %s) in %s: "%s"\n' "$(( delay / 60 ))" "$T" "$DIR" "$PROMPT"
         printf 'Scheduled via daemon(8) (survives logout, NOT reboot). PID: %s\n' "$pid"
         printf 'Cancel: kill %s   Log: %s\n' "$pid" "$LOG"
@@ -251,6 +268,9 @@ PLIST
         wrapper_script="cd '${sq_dir}' && printf '\n### %s - resumed in %s\n\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" '${sq_dir}' >> '${sq_log}' && ${inhibit_prefix:+$inhibit_prefix} ${cmd} >> '${sq_log}' 2>&1; s=\$?; printf '\n### end (exit %s) - %s\n' \"\$s\" '${sq_dir}' >> '${sq_log}'; notify-send 'continuum resume finished (exit '\"\$s\"')' '${sq_dir}' 2>/dev/null || true"
         if systemd-run --user --unit="$unit" --on-active="${delay}s" --description="continuum resume" sh -c "$wrapper_script" 2>/dev/null; then
             scheduled=true
+            # Update pending file with scheduler info
+            fire_epoch=$(( $(date +%s) + delay ))
+            printf '%s|%s|%s|%s|%s\n' "$DIR" "$fire_epoch" "$PROMPT" "${CONTINUUM_AGENT:-claude}" "systemd:$unit" > "$pending_file" 2>/dev/null || true
             printf 'Resuming in %s min (at %s) in %s: "%s"\n' "$(( delay / 60 ))" "$T" "$DIR" "$PROMPT"
             printf 'Scheduled via systemd (survives reboot). Unit: %s\n' "$unit"
             [ -n "$inhibit_prefix" ] && printf 'Sleep inhibited (systemd-inhibit).\n'
@@ -267,6 +287,10 @@ PLIST
             $run_wrapper
         " _ "$delay" "$DIR" "$cmd" >> "$LOG" 2>&1 &
         pid=$!
+        scheduled=true
+        # Update pending file with scheduler info
+        fire_epoch=$(( $(date +%s) + delay ))
+        printf '%s|%s|%s|%s|%s\n' "$DIR" "$fire_epoch" "$PROMPT" "${CONTINUUM_AGENT:-claude}" "nohup:$pid" > "$pending_file" 2>/dev/null || true
         printf 'Resuming in %s min (at %s) in %s: "%s"\n' "$(( delay / 60 ))" "$T" "$DIR" "$PROMPT"
         printf 'Scheduled, PID %s (nohup fallback — will NOT survive reboot).\n' "$pid"
         [ -n "${wl_wrap}" ] && printf 'Sleep inhibited (%s).\n' "${wl_wrap%% *}"

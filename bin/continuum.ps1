@@ -153,6 +153,15 @@ function Invoke-Resume {
     New-Item -ItemType Directory -Force -Path $script:CntState | Out-Null
     Add-Content -Path $log -Value "`n=== scheduled $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') for $Hhmm in $Dir"
 
+    # Write pending resume file so SessionStart can pick it up after compaction/new session.
+    # Format: dir|scheduled_epoch|prompt|agent|scheduler_info
+    $projHash = [System.BitConverter]::ToString([System.Security.Cryptography.MD5]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Dir))).Replace('-', '').Substring(0, 10)
+    $pendingFile = Join-Path $script:CntState ".continuum-pending-resume-$projHash"
+    $fireEpoch = [int64]([DateTimeOffset]::Now.ToUnixTimeSeconds() + $delay)
+    $agent = (if ($env:CONTINUUM_AGENT) { $env:CONTINUUM_AGENT } else { 'claude' })
+    $schedulerInfo = "ps:$proc.Id"  # Will be updated after process starts
+    Set-Content -Path $pendingFile -Value "$Dir|$fireEpoch|$Prompt|$agent|$schedulerInfo" -Force -ErrorAction SilentlyContinue
+
     # Wakelock: prevent system sleep during wait + execution.
     $wlFile = Start-CntWakeLock ($delay + 7200)
     $wlCleanup = ''
@@ -170,6 +179,9 @@ function Invoke-Resume {
     $ps = (Get-Process -Id $PID).Path
     $proc = Start-Process -FilePath $ps -WindowStyle Hidden -PassThru `
                           -ArgumentList '-NoProfile', '-NonInteractive', '-Command', $inner
+
+    # Update pending file with actual scheduler info
+    Set-Content -Path $pendingFile -Value "$Dir|$fireEpoch|$Prompt|$agent|ps:$proc.Id" -Force -ErrorAction SilentlyContinue
 
     "Resuming in {0} min (at {1}) in {2}: `"{3}`"" -f [int]($delay / 60), $Hhmm, $Dir, $Prompt
     "Scheduled, PID {0}. Cancel: Stop-Process -Id {0}   Log: {1}" -f $proc.Id, $log

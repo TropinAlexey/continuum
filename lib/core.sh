@@ -281,6 +281,8 @@ cnt_wakelock_wrap() {
 }
 
 # cnt_hhmm_delay "19:40" -> seconds until the next occurrence of HH:MM (local)
+# Uses date(1) for the arithmetic so DST transitions and timezone quirks are handled
+# by the system's zoneinfo, not by hand-rolled epoch math.
 cnt_hhmm_delay() {
     case "$1" in
         [0-9]:[0-9][0-9]|[0-9][0-9]:[0-9][0-9]) ;;
@@ -290,11 +292,22 @@ cnt_hhmm_delay() {
     if [ "$h" -gt 23 ] || [ "$m" -gt 59 ]; then
         echo "invalid time: $1 (expected HH:MM)" >&2; return 1
     fi
+
+    # Target today at HH:MM local
+    target_today=$(date -d "today ${h}:${m}:00" +%s 2>/dev/null) \
+               || target_today=$(date -j -f "%Y-%m-%d %H:%M:%S" "$(date '+%Y-%m-%d') ${h}:${m}:00" +%s 2>/dev/null) \
+               || { echo "date parsing failed" >&2; return 1; }
+
     now=$(date +%s)
-    midnight=$(( now - ( $(cnt_num "$(date +%H)") * 3600 \
-                       + $(cnt_num "$(date +%M)") * 60 \
-                       + $(cnt_num "$(date +%S)") ) ))
-    target=$(( midnight + h * 3600 + m * 60 ))
-    [ "$target" -le "$now" ] && target=$(( target + 86400 ))  # already passed -> tomorrow
+
+    if [ "$target_today" -le "$now" ]; then
+        # Already passed today -> target tomorrow
+        target=$(date -d "tomorrow ${h}:${m}:00" +%s 2>/dev/null) \
+             || target=$(date -j -v+1d -f "%Y-%m-%d %H:%M:%S" "$(date '+%Y-%m-%d') ${h}:${m}:00" +%s 2>/dev/null) \
+             || { echo "date parsing failed (tomorrow)" >&2; return 1; }
+    else
+        target=$target_today
+    fi
+
     echo $(( target - now ))
 }
