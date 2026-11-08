@@ -395,7 +395,7 @@ out=$(orp "$orr/d" || true); check "openrouter daily limit" "day 90.0 " "$out"
 out=$(orp "$orr/n") && bad "openrouter without a limit or cap fails" "$out" || check "openrouter without a limit or cap fails" "set CONTINUUM_OPENROUTER_CAP" "$out"
 out=$(CONTINUUM_OPENROUTER_CAP=10 orp "$orr/n" || true); check "openrouter cap for a key without a limit" "key 30.0 -" "$out"
 out=$(orp "$orr/g") && bad "openrouter garbage response fails" "$out" || ok "openrouter garbage response fails"
-out=$(OPENROUTER_API_BASE=http://example.com sh "$ROOT/providers/openrouter.sh" 2>&1 </dev/null) && bad "openrouter needs a key" "$out" || check "openrouter needs a key" "OPENROUTER_API_KEY not set" "$out"
+out=$(unset OPENROUTER_API_KEY; OPENROUTER_API_BASE=http://example.com sh "$ROOT/providers/openrouter.sh" 2>&1 </dev/null) && bad "openrouter needs a key" "$out" || check "openrouter needs a key" "OPENROUTER_API_KEY not set" "$out"
 out=$(OPENROUTER_API_KEY=k OPENROUTER_API_BASE=http://example.com sh "$ROOT/providers/openrouter.sh" 2>&1) && bad "openrouter refuses a non-https base" "$out" || check "openrouter refuses a non-https base" "must be https://" "$out"
 check "openrouter feeds continuum status" "resets at" "$(OPENROUTER_API_KEY=k OPENROUTER_API_BASE="$(orb "$orr/m")" CONTINUUM_PROVIDER=openrouter CONTINUUM_STATE_DIR="$orr/st" sh "$ROOT/bin/continuum" status 2>&1)"
 
