@@ -35,6 +35,7 @@ for d in "$(dirname "$self")/../lib" "${CONTINUUM_ROOT:-}/lib" "${CLAUDE_PLUGIN_
     [ -f "$d/core.sh" ] || continue
     CNT_ROOT=$(cd "$d/.." && pwd)   # core.sh cannot find this itself: $0 is the caller
     export CNT_ROOT
+    # shellcheck disable=SC1091
     . "$d/core.sh"
     break
 done

@@ -37,7 +37,7 @@ check_pending_resumes() {
     pending_file="$CNT_STATE/.continuum-pending-resume-$(cnt_md5_hash "$proj_dir")"
     
     if [ -f "$pending_file" ]; then
-        IFS='|' read -r p_dir p_epoch p_prompt p_agent p_scheduler < "$pending_file"
+        IFS='|' read -r p_dir p_epoch p_prompt _p_agent p_scheduler < "$pending_file"
         # Verify directory matches (hash collision protection)
         # CRITICAL: Must execute only AFTER scheduled time, not before.
         if [ "$p_dir" = "$proj_dir" ] && [ "$p_epoch" -le "$now" ]; then
