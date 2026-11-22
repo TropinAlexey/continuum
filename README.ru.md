@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.8.1-brightgreen.svg" alt="version: 0.8.1"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.8.2-brightgreen.svg" alt="version: 0.8.2"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -56,7 +56,7 @@ irm https://raw.githubusercontent.com/TropinAlexey/continuum/main/install.ps1 | 
 - **Уведомления.** Уведомление на рабочий стол (`osascript` / `notify-send` или твой `CONTINUUM_NOTIFY_CMD`), когда запуск resume закончился и когда лимит кончился посреди хода. Текст уходит в `osascript` аргументами, а не как скрипт.
 - **Конфиги агентов (только `continuum install --agent <x>`).** Пишет хуки адаптера в `~/.codex/hooks.json`, `~/.gemini/settings.json` или `~/.cursor/hooks.json` (сначала копия `<файл>.continuum-bak`; файл, где уже есть `"hooks"`, не трогает) или ставит симлинк плагина opencode в `~/.config/opencode/plugins/`. `continuum uninstall --agent <x>` откатывает, пока файл не менялся.
 - **IDE (только `watch --ide`).** Находит MCP-сервер запущенной JetBrains IDE на `127.0.0.1` (порты её процессов через `lsof` или `CONTINUUM_IDE_MCP_URL`), пишет предупреждение в `<проект>/.git/continuum-warning.md` и просит IDE открыть этот файл. Больше ничего не отправляет; без `--ide` — вообще ничего.
-- **Запуск без присмотра.** `continuum resume` запускает агента, когда никто не смотрит, по пресету агента или по `CONTINUUM_RESUME_CMD`; внутри треда bb вместо этого отправляет задачу в тот же тред через `bb thread tell`. Запуск происходит только по твоему выбору: вариант «сохранить и продолжить», ручной вызов команды или заранее заданный `CONTINUUM_RESUME_ON_LIMIT=1`, который планирует resume, когда лимит кончился посреди хода. Ставь узкую задачу и не направляй его на то, что не дал бы мержить незнакомцу.
+- **Запуск без присмотра.** `continuum resume` запускает агента, когда никто не смотрит, по пресету агента или по `CONTINUUM_RESUME_CMD`; внутри треда bb вместо этого отправляет задачу в тот же тред через `bb thread tell`. Запуск происходит только по твоему выбору: вариант «сохранить и продолжить», ручной вызов команды или заранее заданный `CONTINUUM_RESUME_ON_LIMIT=1`, который планирует resume, когда лимит кончился посреди хода. Resume выполняется **только после запланированного времени**, никогда до него. Ставь узкую задачу и не направляй его на то, что не дал бы мержить незнакомцу.
 
 ## Что происходит
 

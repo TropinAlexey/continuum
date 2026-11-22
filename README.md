@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.8.1-brightgreen.svg" alt="version: 0.8.1"></a>
+  <a href="https://github.com/TropinAlexey/continuum/releases"><img src="https://img.shields.io/badge/version-0.8.2-brightgreen.svg" alt="version: 0.8.2"></a>
   <a href="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml"><img src="https://github.com/TropinAlexey/continuum/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
 </p>
@@ -56,7 +56,7 @@ What the core reads, sends, writes and runs. Each adapter adds its own list, in 
 - **Notifications.** A desktop notification (`osascript` / `notify-send`, or your `CONTINUUM_NOTIFY_CMD`) when a resume run ends and when the limit runs out mid-turn. The text goes to `osascript` as arguments, never as script.
 - **Agent configs (only `continuum install --agent <x>`).** Writes the adapter's hooks into `~/.codex/hooks.json`, `~/.gemini/settings.json` or `~/.cursor/hooks.json` (a backup `<file>.continuum-bak` first, refuses files that already have `"hooks"`), or links the opencode plugin into `~/.config/opencode/plugins/`. `continuum uninstall --agent <x>` undoes it while the file is unchanged.
 - **IDE (only `watch --ide`).** Finds the MCP server of a running JetBrains IDE on `127.0.0.1` (the ports its processes listen on, via `lsof`, or `CONTINUUM_IDE_MCP_URL`), writes the warning to `<project>/.git/continuum-warning.md` and asks the IDE to open that file. Nothing else is sent; nothing at all without `--ide`.
-- **Unattended runs.** `continuum resume` starts your agent with nobody watching, using the agent's preset or `CONTINUUM_RESUME_CMD`; inside a bb thread it sends the task to that thread with `bb thread tell` instead. It runs only when you ask for it: by choosing "save and resume", by running the command, or by setting `CONTINUUM_RESUME_ON_LIMIT=1` in advance, which schedules a resume when the limit runs out in the middle of a turn. Keep the task narrow, and don't point it at anything you wouldn't let a stranger merge.
+- **Unattended runs.** `continuum resume` starts your agent with nobody watching, using the agent's preset or `CONTINUUM_RESUME_CMD`; inside a bb thread it sends the task to that thread with `bb thread tell` instead. It runs only when you ask for it: by choosing "save and resume", by running the command, or by setting `CONTINUUM_RESUME_ON_LIMIT=1` in advance, which schedules a resume when the limit runs out in the middle of a turn. Resume executes **only after the scheduled time**, never before. Keep the task narrow, and don't point it at anything you wouldn't let a stranger merge.
 
 ## What happens
 
