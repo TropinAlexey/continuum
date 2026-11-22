@@ -33,14 +33,14 @@ fi
 # Check for pending resumes for this project and execute if due
 check_pending_resumes() {
     now=$(date +%s)
-    # Find pending resume files matching this project directory
-    proj_hash=$(printf '%s' "$proj_dir" | cksum | cut -d' ' -f1)
-    pending_file="$CNT_STATE/.continuum-pending-resume-$proj_hash"
+    # Find pending resume files matching this project directory (using MD5, same as bin/continuum)
+    pending_file="$CNT_STATE/.continuum-pending-resume-$(cnt_md5_hash "$proj_dir")"
     
     if [ -f "$pending_file" ]; then
         IFS='|' read -r p_dir p_epoch p_prompt p_agent p_scheduler < "$pending_file"
         # Verify directory matches (hash collision protection)
-        if [ "$p_dir" = "$proj_dir" ] && [ "$p_epoch" -le "$((now + 60))" ]; then
+        # CRITICAL: Must execute only AFTER scheduled time, not before.
+        if [ "$p_dir" = "$proj_dir" ] && [ "$p_epoch" -le "$now" ]; then
             # Scheduled time has passed (or within 60 seconds) - execute now
             printf '[continuum] Pending resume found for this project, executing now...\n'
             

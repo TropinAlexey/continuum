@@ -81,6 +81,22 @@ function Get-CntProviders {
     $all | Sort-Object -Unique
 }
 
+function Get-Cksum {
+    param([string]$InputString)
+    # Compute CRC32 checksum similar to cksum utility
+    # This is a simplified implementation for hash collision protection
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($InputString)
+    $crc = 0xFFFFFFFF
+    foreach ($b in $bytes) {
+        $crc = $crc -bxor $b
+        for ($j = 0; j -lt 8; $j++) {
+            if ($crc -band 1) { $crc = ($crc -shr 1) -bxor 0xEDB88320 }
+            else { $crc = $crc -shr 1 }
+        }
+    }
+    return ($crc -bxor 0xFFFFFFFF)
+}
+
 function Get-CntProviderPath {
     param([string]$Name)
     foreach ($d in @((Join-Path $script:CntRoot 'providers'), (Join-Path $script:CntState 'providers'))) {
@@ -164,6 +180,49 @@ function Get-CntHhmmDelay {
     $target = $now.Date.AddHours([int]$parts[0]).AddMinutes([int]$parts[1])
     if ($target -le $now) { $target = $target.AddDays(1) }   # already passed -> tomorrow
     return [int]($target - $now).TotalSeconds
+}
+
+# Get resume preset command for an agent
+function cnt-resume-cmd {
+    param([string]$Agent = $env:CONTINUUM_AGENT)
+    if ($env:CONTINUUM_RESUME_CMD) { return $env:CONTINUUM_RESUME_CMD }
+    if ($env:BB_THREAD_ID) {
+        $bb = $env:BB_THREAD_ID
+        if ($bb -match '^[A-Za-z0-9_-]+$') { return "bb thread tell $bb '{prompt}'" }
+    }
+    $preset = switch ($Agent) {
+        'claude'   { return 'claude --continue -p "{prompt}" --permission-mode acceptEdits' }
+        'codex'    { return 'codex exec resume --last -c sandbox_mode=workspace-write "{prompt}"' }
+        'gemini'   { return 'gemini --resume latest --approval-mode auto_edit -p "{prompt}"' }
+        'cursor'   { return 'agent -p --continue "{prompt}"' }
+        'opencode' { return 'opencode run --continue "{prompt}"' }
+        'junie'    { return 'junie --skip-update-check --resume --task "{prompt}"' }
+        default    { return $null }
+    }
+    if ($preset) { return $preset }
+    throw "no resume preset for agent '$Agent' - set CONTINUUM_RESUME_CMD"
+}
+
+# Send notification (wrapper for tests)
+function cnt-notify {
+    param([string]$Title, [string]$Message)
+    if ($env:CONTINUUM_NOTIFY_CMD) {
+        try {
+            $cmd = $env:CONTINUUM_NOTIFY_CMD -split '\s+'
+            & $cmd[0] $cmd[1..($cmd.Count-1)] $Title $Message 2>$null | Out-Null
+        } catch {}
+        return
+    }
+    # Use Windows toast notification
+    try {
+        [void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
+        $n = New-Object System.Windows.Forms.NotifyIcon
+        $n.Icon = [System.Drawing.SystemIcons]::Information
+        $n.BalloonTipTitle = $Title
+        $n.BalloonTipText = $Message
+        $n.Visible = $true
+        $n.ShowBalloonTip(5000)
+    } catch {}
 }
 
 # Token lookup, Windows edition: env var, then Claude Code's credentials file.

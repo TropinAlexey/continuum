@@ -165,7 +165,7 @@ cmd_resume() {
 
     # Write pending resume file so SessionStart can pick it up after compaction/new session.
     # Format: dir|scheduled_epoch|prompt|agent|scheduler_info
-    pending_dir_hash=$(printf '%s' "$DIR" | cksum | cut -d' ' -f1)
+    pending_dir_hash=$(cnt_md5_hash "$DIR")
     pending_file="$CNT_STATE/.continuum-pending-resume-$pending_dir_hash"
     fire_epoch=$(( $(date +%s) + delay ))
     # scheduler_info: label for launchd, unit for systemd, pid for daemon/nohup
@@ -506,7 +506,7 @@ cmd_limit_hit() {
             # would fire too early and hit the limit again.
             msg="$msg. The reset is more than a day away, so no resume was scheduled - run continuum resume with your task then"
         else
-            rflag="$CNT_STATE/.continuum-limit-resume-$(printf '%s' "$dir" | cksum | cut -d' ' -f1)"
+            rflag="$CNT_STATE/.continuum-limit-resume-$(cnt_md5_hash "$dir")"
             if [ "$(cat "$rflag" 2>/dev/null)" = "$reset" ]; then
                 msg="$msg. A resume for this directory is already scheduled"
             else

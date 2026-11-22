@@ -311,3 +311,19 @@ cnt_hhmm_delay() {
 
     echo $(( target - now ))
 }
+
+# cnt_md5_hash "string" -> first 10 chars of MD5 hash (cross-platform)
+# Matches PowerShell implementation in bin/continuum.ps1 for pending file compatibility
+cnt_md5_hash() {
+    # macOS: md5 -q (quiet = raw hash), Linux: md5sum (cut to first field)
+    if command -v md5 >/dev/null 2>&1; then
+        printf '%s' "$1" | md5 -q 2>/dev/null | head -1 | cut -c1-10
+    elif command -v md5sum >/dev/null 2>&1; then
+        printf '%s' "$1" | md5sum 2>/dev/null | cut -d' ' -f1 | cut -c1-10
+    elif command -v openssl >/dev/null 2>&1; then
+        printf '%s' "$1" | openssl md5 2>/dev/null | awk '{print $2}' | cut -c1-10
+    else
+        # Fallback to cksum (CRC32, less collision-resistant but always available)
+        printf '%s' "$1" | cksum | cut -d' ' -f1
+    fi
+}

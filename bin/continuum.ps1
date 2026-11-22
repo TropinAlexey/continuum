@@ -417,8 +417,8 @@ function Invoke-LimitHit {
                 # would fire too early and hit the limit again.
                 $msg += '. The reset is more than a day away, so no resume was scheduled - run continuum resume with your task then'
             } else {
-                $sha = [System.Security.Cryptography.SHA256]::Create()
-                $hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Dir))[0..7] | ForEach-Object { $_.ToString('x2') })
+                # Use MD5 hash (first 10 chars), same as bin/continuum for compatibility
+                $hash = [System.BitConverter]::ToString([System.Security.Cryptography.MD5]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($Dir))).Replace('-', '').Substring(0, 10)
                 $rflag = Join-Path $script:CntState ".continuum-limit-resume-$hash"
                 if ((Test-Path $rflag) -and ([System.IO.File]::ReadAllText($rflag).Trim() -eq $reset)) {
                     $msg += '. A resume for this directory is already scheduled'
